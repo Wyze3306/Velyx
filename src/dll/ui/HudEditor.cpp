@@ -87,6 +87,7 @@ void HudEditor::onMouse(MouseEvent& event) {
             if (!element->enabled()) continue;
             if (!element->bounds().contains(event.position)) continue;
 
+            selected_ = element;
             dragged_ = element;
             dragOffset_ = event.position - element->bounds().topLeft();
             break;
@@ -114,7 +115,7 @@ void HudEditor::onKey(KeyEvent& event) {
         return;
     }
 
-    HudModule* target = dragged_ ? dragged_ : hovered_;
+    HudModule* target = dragged_ ? dragged_ : (hovered_ ? hovered_ : selected_);
     if (event.down && target) {
         const float step = event.shift
                                ? static_cast<float>(settings.value<int>("gridSize", 8))
@@ -246,51 +247,154 @@ void HudEditor::drawGuides(Renderer& renderer, const Rect& moving, const std::ve
     }
 }
 
-void HudEditor::drawToolbar(Renderer& renderer, Vec2 screenSize) {
+void HudEditor::drawSelection(Renderer& renderer, HudModule& element) {
     Ui& gui = ui();
     const auto& active = theme();
 
-    const Rect toolbar{screenSize.x * 0.5f - 300.f, 16.f, screenSize.x * 0.5f + 300.f,
-                       16.f + kToolbarHeight};
+    const Rect bounds = element.bounds();
+    if (bounds.width() <= 0.f) return;
 
-    gui.panel(toolbar, active.panelRadius, true);
+    const Rect ring = bounds.inflated(3.f);
+    renderer.strokeRounded(ring, active.liveAccent(), active.radius + 3.f, 1.5f);
 
-    gui.text("Éditeur de HUD", Rect{toolbar.left + 18.f, toolbar.top, toolbar.left + 150.f,
-                                    toolbar.bottom},
-             active.text, 14.f, FontWeight::Bold);
+    for (const Vec2 corner : {ring.topLeft(), Vec2{ring.right, ring.top},
+                              Vec2{ring.left, ring.bottom}, Vec2{ring.right, ring.bottom}}) {
+        const Rect handle = Rect::fromSize(corner.x - 4.f, corner.y - 4.f, 8.f, 8.f);
+        renderer.fillRounded(handle, active.backgroundDeep, 2.f);
+        renderer.strokeRounded(handle, active.liveAccent(), 2.f, 1.5f);
+    }
+
+    FontSpec label;
+    label.family = active.fontFamily;
+    label.size = 11.5f * active.fontScale;
+    label.weight = FontWeight::Medium;
+    label.valign = TextVAlign::Middle;
+
+    const std::string name = element.group().empty()
+                                 ? element.name()
+                                 : element.name() + "  ·  " + element.group();
+    const float nameWidth = renderer.measure(name, label).x;
+    const float barWidth = 30.f + nameWidth + 12.f + 3 * 28.f + 10.f;
+
+    Rect bar{ring.left, ring.top - 44.f, ring.left + barWidth, ring.top - 8.f};
+    if (bar.top < 6.f) bar = Rect{ring.left, ring.bottom + 8.f, ring.left + barWidth,
+                                  ring.bottom + 44.f};
+
+    renderer.dropShadow(bar, active.shadowColor, active.radius + 2.f, 10.f, {0.f, 4.f});
+    renderer.fillRounded(bar, active.background.withAlpha(0.97f), active.radius + 2.f);
+    renderer.strokeRounded(bar, active.border, active.radius + 2.f, active.borderWidth);
+
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            renderer.fillCircle({bar.left + 11.f + static_cast<float>(j) * 5.f,
+                                 bar.center().y - 4.f + static_cast<float>(i) * 4.f},
+                                1.1f, active.textDim);
+        }
+    }
+
+    renderer.text(name, Rect{bar.left + 30.f, bar.top, bar.left + 30.f + nameWidth + 4.f,
+                             bar.bottom},
+                  active.text, label);
+
+    float x = bar.left + 30.f + nameWidth + 8.f;
+    renderer.line({x, bar.top + 9.f}, {x, bar.bottom - 9.f}, active.border, 1.f);
+    x += 4.f;
+
+    const bool locked = locked_.count(element.id()) > 0;
+
+    if (gui.iconButton(UiId("hud_gear"), Rect{x, bar.top + 4.f, x + 28.f, bar.bottom - 4.f}, "⚙",
+                       active.textMuted)) {
+        if (Module* menu = modules().find("clickgui")) menu->setEnabled(true);
+        setEnabled(false);
+        return;
+    }
+    x += 28.f;
+
+    if (gui.iconButton(UiId("hud_lock"), Rect{x, bar.top + 4.f, x + 28.f, bar.bottom - 4.f},
+                       locked ? "⯀" : "⯁",
+                       locked ? active.liveAccent() : active.textMuted)) {
+        if (locked) {
+            locked_.erase(element.id());
+        } else {
+            locked_.insert(element.id());
+        }
+    }
+    x += 28.f;
+
+    if (gui.iconButton(UiId("hud_close"), Rect{x, bar.top + 4.f, x + 28.f, bar.bottom - 4.f}, "✕",
+                       active.danger)) {
+        element.setEnabled(false);
+        selected_ = nullptr;
+        dragged_ = nullptr;
+    }
+}
+
+void HudEditor::drawBottomBar(Renderer& renderer, Vec2 screenSize) {
+    Ui& gui = ui();
+    const auto& active = theme();
+
+    const float width = 560.f;
+    const Rect bar{screenSize.x * 0.5f - width * 0.5f, screenSize.y - 72.f,
+                   screenSize.x * 0.5f + width * 0.5f, screenSize.y - 26.f};
+
+    gui.panel(bar, active.panelRadius, true);
+
+    gui.text("Éditeur de HUD", Rect{bar.left + 18.f, bar.top, bar.left + 130.f, bar.bottom},
+             active.text, 12.5f, FontWeight::SemiBold);
+
+    renderer.line({bar.left + 140.f, bar.top + 12.f}, {bar.left + 140.f, bar.bottom - 12.f},
+                  active.border, 1.f);
 
     bool showGrid = settings.value<bool>("showGrid", true);
-    if (gui.toggle(UiId("editor_grid"),
-                   Rect{toolbar.left + 160.f, toolbar.top, toolbar.left + 210.f, toolbar.bottom},
-                   showGrid)) {
-        settings.set("showGrid", SettingValue{showGrid});
+    if (gui.chip(UiId("editor_grid"),
+                 Rect{bar.left + 152.f, bar.center().y - 15.f, bar.left + 224.f,
+                      bar.center().y + 15.f},
+                 "Grille", showGrid)) {
+        settings.set("showGrid", SettingValue{!showGrid});
     }
-    gui.text("Grille", Rect{toolbar.left + 214.f, toolbar.top, toolbar.left + 262.f, toolbar.bottom},
-             active.textMuted, 12.f);
 
     bool snapGrid = settings.value<bool>("snapToGrid", true);
-    if (gui.toggle(UiId("editor_snap"),
-                   Rect{toolbar.left + 270.f, toolbar.top, toolbar.left + 320.f, toolbar.bottom},
-                   snapGrid)) {
-        settings.set("snapToGrid", SettingValue{snapGrid});
+    if (gui.chip(UiId("editor_snap"),
+                 Rect{bar.left + 230.f, bar.center().y - 15.f, bar.left + 300.f,
+                      bar.center().y + 15.f},
+                 "Aimant", snapGrid)) {
+        settings.set("snapToGrid", SettingValue{!snapGrid});
     }
-    gui.text("Aimant", Rect{toolbar.left + 324.f, toolbar.top, toolbar.left + 380.f, toolbar.bottom},
-             active.textMuted, 12.f);
 
-    float gridSize = static_cast<float>(settings.value<int>("gridSize", 8));
-    if (gui.slider(UiId("editor_gridsize"),
-                   Rect{toolbar.left + 396.f, toolbar.center().y - 6.f, toolbar.right - 110.f,
-                        toolbar.center().y + 6.f},
-                   gridSize, 2.f, 64.f, " px", 1.f)) {
-        settings.set("gridSize", SettingValue{static_cast<int>(gridSize)});
+    const int size = settings.value<int>("gridSize", 8);
+    const Rect stepper{bar.left + 310.f, bar.center().y - 15.f, bar.left + 412.f,
+                       bar.center().y + 15.f};
+    renderer.fillRounded(stepper, active.surface, active.radius);
+    renderer.strokeRounded(stepper, active.border, active.radius, active.borderWidth);
+
+    if (gui.iconButton(UiId("grid_down"),
+                       Rect{stepper.left + 3.f, stepper.top + 3.f, stepper.left + 27.f,
+                            stepper.bottom - 3.f},
+                       "−", active.textMuted)) {
+        settings.set("gridSize", SettingValue{std::max(2, size / 2)});
+    }
+
+    gui.text(std::format("{} px", size),
+             Rect{stepper.left + 27.f, stepper.top, stepper.right - 27.f, stepper.bottom},
+             active.text, 11.5f, FontWeight::Medium, TextAlign::Center);
+
+    if (gui.iconButton(UiId("grid_up"),
+                       Rect{stepper.right - 27.f, stepper.top + 3.f, stepper.right - 3.f,
+                            stepper.bottom - 3.f},
+                       "+", active.textMuted)) {
+        settings.set("gridSize", SettingValue{std::min(64, size * 2)});
     }
 
     if (gui.button(UiId("editor_done"),
-                   Rect{toolbar.right - 100.f, toolbar.center().y - 14.f, toolbar.right - 14.f,
-                        toolbar.center().y + 14.f},
-                   "Terminer", true)) {
+                   Rect{bar.right - 108.f, bar.center().y - 15.f, bar.right - 16.f,
+                        bar.center().y + 15.f},
+                   "Terminé", true)) {
         setEnabled(false);
     }
+
+    gui.text("Glissez pour déplacer · Maj + flèches pour ajuster au pixel · Échap pour sortir",
+             Rect{bar.left - 60.f, bar.top - 26.f, bar.right + 60.f, bar.top - 6.f},
+             active.textDim, 11.f, FontWeight::Regular, TextAlign::Center);
 }
 
 void HudEditor::onRender(RenderTopEvent& event) {
@@ -316,6 +420,15 @@ void HudEditor::onRender(RenderTopEvent& event) {
     const auto huds = modules().huds();
     const auto group = movingGroup();
 
+    if (!selected_) {
+        for (HudModule* element : huds) {
+            if (element->enabled()) {
+                selected_ = element;
+                break;
+            }
+        }
+    }
+
     std::vector<Rect> others;
     for (HudModule* element : huds) {
         if (!element->enabled()) continue;
@@ -328,7 +441,7 @@ void HudEditor::onRender(RenderTopEvent& event) {
         if (element->enabled() && element->bounds().contains(gui.mouse())) hovered_ = element;
     }
 
-    if (dragged_ && gui.mouseDown()) {
+    if (dragged_ && gui.mouseDown() && locked_.count(dragged_->id()) == 0) {
         const Rect bounds = dragged_->bounds();
         const Vec2 wanted = gui.mouse() - dragOffset_;
         const Vec2 snapped = snap(wanted, bounds, others, event.screenSize);
@@ -338,61 +451,31 @@ void HudEditor::onRender(RenderTopEvent& event) {
             element->moveTo(element->bounds().topLeft() + delta, event.screenSize);
         }
 
-        drawGuides(renderer, Rect::fromSize(snapped.x, snapped.y, bounds.width(), bounds.height()),
-                   others);
+        if (settings.value<bool>("snapToEdges", true)) {
+            drawGuides(renderer,
+                       Rect::fromSize(snapped.x, snapped.y, bounds.width(), bounds.height()),
+                       others);
+        }
     }
 
     if (settings.value<bool>("showBounds", true)) {
         for (HudModule* element : huds) {
-            if (!element->enabled()) continue;
+            if (!element->enabled() || element == selected_) continue;
 
             const Rect bounds = element->bounds();
             if (bounds.width() <= 0.f) continue;
 
-            const bool isDragged = std::ranges::find(group, element) != group.end();
             const bool isHovered = element == hovered_;
-
-            const Color outline = isDragged  ? active.liveAccent()
-                                  : isHovered ? active.accentGlow.fade(0.8f)
-                                              : active.border.fade(0.75f);
-
-            renderer.strokeRounded(bounds.inflated(2.f), outline, active.radius,
-                                   isDragged ? 2.f : 1.f);
-
-            const float tick = 6.f;
-            for (const Vec2 corner : {bounds.topLeft(), Vec2{bounds.right, bounds.top},
-                                      Vec2{bounds.left, bounds.bottom},
-                                      Vec2{bounds.right, bounds.bottom}}) {
-                renderer.fillRounded(Rect::fromSize(corner.x - tick * 0.5f, corner.y - tick * 0.5f,
-                                                    tick, tick),
-                                     outline, 1.5f);
-            }
-
-            if (settings.value<bool>("showNames", true) && (isHovered || isDragged)) {
-                FontSpec spec;
-                spec.family = active.fontFamily;
-                spec.size = 11.f;
-                spec.weight = FontWeight::SemiBold;
-                spec.valign = TextVAlign::Middle;
-
-                const std::string label =
-                    element->group().empty()
-                        ? element->name()
-                        : std::format("{}  ·  groupe « {} »", element->name(), element->group());
-
-                const Vec2 size = renderer.measure(label, spec);
-                const Rect tag{bounds.left, bounds.top - size.y - 8.f, bounds.left + size.x + 12.f,
-                               bounds.top - 2.f};
-
-                renderer.fillRounded(tag, active.liveAccent(), active.radius * 0.6f);
-                renderer.text(label,
-                              Rect{tag.left + 6.f, tag.top, tag.right, tag.bottom},
-                              active.liveAccent().readableForeground(), spec);
-            }
+            renderer.strokeRounded(bounds.inflated(3.f),
+                                   isHovered ? active.accentGlow.fade(0.55f)
+                                             : active.border.fade(0.45f),
+                                   active.radius + 3.f, 1.f);
         }
     }
 
-    drawToolbar(renderer, event.screenSize);
+    if (selected_ && selected_->enabled()) drawSelection(renderer, *selected_);
+
+    drawBottomBar(renderer, event.screenSize);
 
     renderer.popOpacity();
     gui.endFrame();
