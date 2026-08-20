@@ -49,6 +49,7 @@ std::filesystem::path Paths::crashes() { return logs() / "crashes"; }
 std::filesystem::path Paths::cache() { return root() / "cache"; }
 std::filesystem::path Paths::assets() { return root() / "assets"; }
 std::filesystem::path Paths::instances() { return root() / "instances"; }
+std::filesystem::path Paths::versions() { return root() / "versions"; }
 std::filesystem::path Paths::accounts() { return root() / "accounts"; }
 
 std::filesystem::path Paths::profile(const std::string& name) {

@@ -29,7 +29,7 @@ enum class TextAlign { Left, Center, Right };
 enum class TextVAlign { Top, Middle, Bottom };
 
 struct FontSpec {
-    std::string family = "Velyx Sans";
+    std::string family = "Space Grotesk";
     float size = 16.f;
     FontWeight weight = FontWeight::Regular;
     bool italic = false;

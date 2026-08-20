@@ -14,16 +14,17 @@ struct Theme {
     std::string author = "Velyx";
     std::string description;
 
-    Color background = palette::kForest;
-    Color backgroundDeep = palette::kVoid;
-    Color surface = palette::kMoss;
-    Color surfaceHover = Color::rgb8(24, 61, 40);
-    Color border = palette::kSage;
+    Color background = palette::kSlate;
+    Color backgroundDeep = palette::kInk;
+    Color surface = palette::kGraphite;
+    Color surfaceHover = palette::kSteel;
+    Color border = palette::kLine;
     Color accent = palette::kMint;
     Color accentDeep = palette::kJade;
     Color accentGlow = palette::kGlow;
     Color text = palette::kSnow;
     Color textMuted = palette::kAsh;
+    Color textDim = palette::kDim;
     Color danger = palette::kEmber;
     Color warning = palette::kHoney;
     Color success = palette::kMint;
@@ -31,13 +32,13 @@ struct Theme {
     bool rgbAccent = false;
     float rgbSpeed = 1.f;
 
-    float radius = 8.f;
-    float panelRadius = 16.f;
+    float radius = 9.f;
+    float panelRadius = 14.f;
     float borderWidth = 1.f;
     float spacing = 8.f;
 
-    std::string fontFamily = "Velyx Sans";
-    std::string monoFamily = "Cascadia Mono";
+    std::string fontFamily = "Space Grotesk";
+    std::string monoFamily = "JetBrains Mono";
     float fontScale = 1.f;
     float letterSpacing = 0.f;
 
@@ -45,8 +46,8 @@ struct Theme {
     float blurSigma = 9.f;
     bool shadows = true;
     float shadowSpread = 14.f;
-    Color shadowColor = Color::rgb8(0, 0, 0, 140);
-    float panelOpacity = 0.94f;
+    Color shadowColor = Color::rgb8(0, 0, 0, 150);
+    float panelOpacity = 0.96f;
 
     float animationSpeed = 1.f;
     Easing easing = Easing::OutCubic;

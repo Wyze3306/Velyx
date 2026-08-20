@@ -130,11 +130,11 @@ void ProfileManager::createStarterProfiles() {
     const std::vector<Profile> starters{
         Profile{"Global", "Profil par défaut, utilisé quand aucun autre ne correspond.", "Velyx",
                 {}, false, true, nowMs()},
-        Profile{"Hive", "HUD compact et stats orientées Hive.", "Emerald Night",
+        Profile{"Hive", "HUD compact et stats orientées Hive.", "Nuit",
                 {"hive", "hivebedrock"}, true, false, nowMs()},
         Profile{"CubeCraft", "Réglages pour CubeCraft.", "Velyx",
                 {"cubecraft", "cubecraft.net"}, true, false, nowMs()},
-        Profile{"PvP", "Latence minimale, effets réduits, HUD lisible.", "Emerald Night",
+        Profile{"PvP", "Latence minimale, effets réduits, HUD lisible.", "Nuit",
                 {"zeqa", "pvp", "duels"}, true, false, nowMs()},
         Profile{"Survie", "HUD complet : coordonnées, boussole, waypoints.", "Velyx",
                 {}, false, false, nowMs()},

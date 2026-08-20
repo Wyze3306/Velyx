@@ -64,16 +64,18 @@ Color rainbow(float speed = 1.f, float saturation = 0.75f, float value = 1.f, fl
 
 namespace palette {
 
-inline constexpr Color kVoid = Color::rgb8(6, 16, 12);
-inline constexpr Color kForest = Color::rgb8(11, 31, 23);
-inline constexpr Color kMoss = Color::rgb8(18, 48, 31);
-inline constexpr Color kSage = Color::rgb8(30, 71, 48);
-inline constexpr Color kJade = Color::rgb8(45, 168, 106);
+inline constexpr Color kInk = Color::rgb8(14, 15, 17);
+inline constexpr Color kSlate = Color::rgb8(22, 24, 27);
+inline constexpr Color kGraphite = Color::rgb8(25, 28, 32);
+inline constexpr Color kSteel = Color::rgb8(36, 40, 45);
+inline constexpr Color kLine = Color::rgb8(42, 47, 53);
+inline constexpr Color kJade = Color::rgb8(47, 169, 104);
 inline constexpr Color kMint = Color::rgb8(61, 220, 132);
 inline constexpr Color kGlow = Color::rgb8(124, 255, 178);
-inline constexpr Color kSnow = Color::rgb8(244, 250, 246);
-inline constexpr Color kAsh = Color::rgb8(163, 184, 172);
-inline constexpr Color kEmber = Color::rgb8(232, 96, 82);
+inline constexpr Color kSnow = Color::rgb8(236, 239, 242);
+inline constexpr Color kAsh = Color::rgb8(154, 163, 172);
+inline constexpr Color kDim = Color::rgb8(107, 116, 128);
+inline constexpr Color kEmber = Color::rgb8(232, 96, 78);
 inline constexpr Color kHoney = Color::rgb8(240, 186, 84);
 
 }

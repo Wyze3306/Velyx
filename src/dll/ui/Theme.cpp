@@ -16,7 +16,7 @@ namespace {
 constexpr const char* kLog = "Theme";
 constexpr const char* kExtension = ".velyxtheme";
 
-const char* kBuiltInNames[] = {"Velyx", "Velyx Light", "Emerald Night", "Contrast"};
+const char* kBuiltInNames[] = {"Velyx", "Velyx Light", "Nuit", "Contrast"};
 
 nlohmann::json colorToJson(const Color& color) { return color.toHex(true); }
 
@@ -71,6 +71,7 @@ nlohmann::json serialize(const Theme& theme) {
     colors["accentGlow"] = colorToJson(theme.accentGlow);
     colors["text"] = colorToJson(theme.text);
     colors["textMuted"] = colorToJson(theme.textMuted);
+    colors["textDim"] = colorToJson(theme.textDim);
     colors["danger"] = colorToJson(theme.danger);
     colors["warning"] = colorToJson(theme.warning);
     colors["success"] = colorToJson(theme.success);
@@ -123,6 +124,7 @@ Theme deserialize(const nlohmann::json& json) {
         theme.accentGlow = colorFromJson(c.value("accentGlow", nlohmann::json{}), theme.accentGlow);
         theme.text = colorFromJson(c.value("text", nlohmann::json{}), theme.text);
         theme.textMuted = colorFromJson(c.value("textMuted", nlohmann::json{}), theme.textMuted);
+        theme.textDim = colorFromJson(c.value("textDim", nlohmann::json{}), theme.textDim);
         theme.danger = colorFromJson(c.value("danger", nlohmann::json{}), theme.danger);
         theme.warning = colorFromJson(c.value("warning", nlohmann::json{}), theme.warning);
         theme.success = colorFromJson(c.value("success", nlohmann::json{}), theme.success);
@@ -197,62 +199,63 @@ bool ThemeManager::isBuiltIn(const std::string& name) {
 }
 
 void ThemeManager::registerBuiltIns() {
-
     Theme velyx;
-    velyx.description = "Vert forêt profond, accent menthe. Le thème signature.";
+    velyx.description = "Surfaces graphite, accent menthe. Le thème par défaut.";
     themes_.push_back(velyx);
 
     Theme light = velyx;
     light.name = "Velyx Light";
-    light.description = "La même identité, sur fond clair.";
-    light.background = Color::rgb8(243, 249, 245);
-    light.backgroundDeep = Color::rgb8(226, 238, 231);
+    light.description = "La même grammaire, sur fond clair.";
+    light.background = Color::rgb8(247, 248, 249);
+    light.backgroundDeep = Color::rgb8(233, 236, 238);
     light.surface = Color::rgb8(255, 255, 255);
-    light.surfaceHover = Color::rgb8(232, 245, 237);
-    light.border = Color::rgb8(203, 224, 212);
-    light.accent = Color::rgb8(26, 138, 82);
-    light.accentDeep = Color::rgb8(17, 105, 62);
+    light.surfaceHover = Color::rgb8(240, 242, 244);
+    light.border = Color::rgb8(219, 223, 227);
+    light.accent = Color::rgb8(26, 152, 88);
+    light.accentDeep = Color::rgb8(17, 120, 68);
     light.accentGlow = Color::rgb8(61, 220, 132);
-    light.text = Color::rgb8(12, 34, 23);
-    light.textMuted = Color::rgb8(94, 122, 106);
-    light.shadowColor = Color::rgb8(20, 60, 40, 45);
-    light.panelOpacity = 0.97f;
+    light.text = Color::rgb8(24, 27, 31);
+    light.textMuted = Color::rgb8(96, 105, 115);
+    light.textDim = Color::rgb8(140, 149, 158);
+    light.shadowColor = Color::rgb8(20, 24, 30, 38);
+    light.panelOpacity = 0.98f;
     themes_.push_back(light);
 
-    Theme emerald = velyx;
-    emerald.name = "Emerald Night";
-    emerald.description = "Contraste élevé, angles serrés, lisible en PvP.";
-    emerald.background = Color::rgb8(4, 12, 9);
-    emerald.backgroundDeep = Color::rgb8(0, 0, 0);
-    emerald.surface = Color::rgb8(10, 26, 18);
-    emerald.surfaceHover = Color::rgb8(16, 40, 27);
-    emerald.border = Color::rgb8(24, 66, 44);
-    emerald.accent = Color::rgb8(0, 255, 140);
-    emerald.accentDeep = Color::rgb8(0, 190, 105);
-    emerald.radius = 4.f;
-    emerald.panelRadius = 8.f;
-    emerald.blur = false;
-    emerald.shadowSpread = 8.f;
-    themes_.push_back(emerald);
-
     Theme contrast = velyx;
-    contrast.name = "Contrast";
-    contrast.description = "Sans animation ni flou, contraste maximal.";
-    contrast.background = Color::rgb8(0, 0, 0);
+    contrast.name = "Nuit";
+    contrast.description = "Plus sombre et plus serré, pour le PvP.";
+    contrast.background = Color::rgb8(10, 11, 13);
     contrast.backgroundDeep = Color::rgb8(0, 0, 0);
-    contrast.surface = Color::rgb8(18, 18, 18);
-    contrast.surfaceHover = Color::rgb8(38, 38, 38);
-    contrast.border = Color::rgb8(255, 255, 255);
-    contrast.accent = Color::rgb8(0, 255, 128);
-    contrast.accentDeep = Color::rgb8(0, 200, 100);
-    contrast.text = Color::rgb8(255, 255, 255);
-    contrast.textMuted = Color::rgb8(220, 220, 220);
-    contrast.borderWidth = 2.f;
-    contrast.fontScale = 1.15f;
+    contrast.surface = Color::rgb8(18, 20, 23);
+    contrast.surfaceHover = Color::rgb8(30, 33, 38);
+    contrast.border = Color::rgb8(38, 42, 48);
+    contrast.accent = Color::rgb8(0, 240, 132);
+    contrast.accentDeep = Color::rgb8(0, 180, 100);
+    contrast.radius = 6.f;
+    contrast.panelRadius = 10.f;
     contrast.blur = false;
-    contrast.shadows = false;
-    contrast.animationSpeed = 0.f;
+    contrast.shadowSpread = 10.f;
     themes_.push_back(contrast);
+
+    Theme access = velyx;
+    access.name = "Contrast";
+    access.description = "Sans animation ni flou, contraste maximal.";
+    access.background = Color::rgb8(0, 0, 0);
+    access.backgroundDeep = Color::rgb8(0, 0, 0);
+    access.surface = Color::rgb8(20, 20, 20);
+    access.surfaceHover = Color::rgb8(44, 44, 44);
+    access.border = Color::rgb8(255, 255, 255);
+    access.accent = Color::rgb8(0, 255, 140);
+    access.accentDeep = Color::rgb8(0, 200, 110);
+    access.text = Color::rgb8(255, 255, 255);
+    access.textMuted = Color::rgb8(224, 224, 224);
+    access.textDim = Color::rgb8(190, 190, 190);
+    access.borderWidth = 2.f;
+    access.fontScale = 1.15f;
+    access.blur = false;
+    access.shadows = false;
+    access.animationSpeed = 0.f;
+    themes_.push_back(access);
 }
 
 void ThemeManager::load() {

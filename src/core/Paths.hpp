@@ -29,6 +29,7 @@ public:
     static std::filesystem::path assets();
 
     static std::filesystem::path instances();
+    static std::filesystem::path versions();
     static std::filesystem::path accounts();
 
     static void ensureLayout();

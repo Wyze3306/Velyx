@@ -10,7 +10,7 @@ namespace {
 
 constexpr const char* kLog = "Font";
 
-const char* kFallbackFamilies[] = {"Velyx Sans", "Segoe UI Variable Text", "Segoe UI", "Arial"};
+const char* kFallbackFamilies[] = {"Space Grotesk", "Segoe UI Variable Text", "Segoe UI", "Arial"};
 
 DWRITE_FONT_WEIGHT toDWrite(FontWeight weight) {
     return static_cast<DWRITE_FONT_WEIGHT>(static_cast<int>(weight));
