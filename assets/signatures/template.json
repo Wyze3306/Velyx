@@ -1,0 +1,38 @@
+{
+  "_comment": "Modèle de pack de signatures Velyx. Copiez-le en <majeure.mineure>.json (par ex. 1.21.json) et remplissez les motifs. Voir README.md.",
+
+  "signatures": {
+    "ClientInstance::instance": {
+      "pattern": "",
+      "kind": "relative",
+      "operand": 3,
+      "length": 7
+    },
+    "LocalPlayer::sendChatMessage": { "pattern": "" },
+    "GuiData::displayClientMessage": { "pattern": "" }
+  },
+
+  "offsets": {
+    "ClientInstance::localPlayer": -1,
+    "ClientInstance::level": -1,
+    "ClientInstance::screenName": -1,
+
+    "Actor::position": -1,
+    "Actor::velocity": -1,
+    "Actor::rotation": -1,
+    "Actor::onGround": -1,
+    "Actor::nameTag": -1,
+
+    "Player::health": -1,
+    "Player::maxHealth": -1,
+    "Player::absorption": -1,
+    "Player::hunger": -1,
+    "Player::armourPoints": -1,
+    "Player::experienceLevel": -1,
+    "Player::experienceProgress": -1,
+
+    "Connection::serverAddress": -1,
+    "RakNetConnector::ping": -1,
+    "Level::runtimeActorList": -1
+  }
+}
