@@ -1,81 +1,72 @@
 # Architecture
 
-Ce document explique comment Velyx est structuré et **pourquoi**. Les décisions
-qui ont l'air arbitraires ont presque toutes une raison liée à la nature de
-Bedrock : une application MSIX, en D3D12, qui change d'adresses toutes les six
-semaines.
+How the pieces fit, and why. Most of the decisions that look arbitrary come from
+what Bedrock actually is: an MSIX application, rendering through D3D12, whose
+addresses move every six weeks.
 
----
-
-## Vue d'ensemble
+## Overview
 
 ```
                     ┌─────────────────────────────┐
    Velyx.exe ──────▶│  Minecraft.Windows.exe      │
    (launcher)       │                             │
-   crée l'instance  │   ┌─────────────────────┐   │
-   injecte la DLL   │   │      Velyx.dll      │   │
-                    │   └─────────────────────┘   │
+   creates the      │   ┌─────────────────────┐   │
+   instance and     │   │      Velyx.dll      │   │
+   injects the DLL  │   └─────────────────────┘   │
                     └─────────────────────────────┘
 ```
 
-Le launcher et la DLL partagent `velyx_core` (journalisation, chemins, couleurs,
-chaînes, processus). Rien dans `core` ne connaît le jeu : c'est ce qui permet au
-launcher de le lier sans traîner tout le client.
+The launcher and the client share `velyx_core` (logging, path layout, colour,
+strings, processes). Nothing in `core` knows about the game, which is what lets
+the launcher link it without pulling in the whole client.
 
----
+## Startup
 
-## Démarrage de la DLL
-
-`DllMain` ne fait qu'une chose : créer un thread. Tout le reste — création d'un
-device D3D, scan mémoire, accès disque — se ferait sous le *loader lock* et
-figerait le jeu.
+`DllMain` does one thing: create a thread. Everything else, creating a D3D
+device, scanning memory, touching the disk, would run under the loader lock and
+freeze the game.
 
 ```
 DllMain
   └─ thread → Velyx::start()
-       ├─ Paths::ensureLayout()          arborescence %APPDATA%/Velyx
-       ├─ Log::init()                    fichier + console optionnelle
-       ├─ ClientConfig::load()           + détection de plantage précédent
-       ├─ sdk::bindGame()                déclare les signatures nécessaires
-       ├─ Signatures::resolveAll()       scan (ou cache disque)
+       ├─ Paths::ensureLayout()          %APPDATA%/Velyx tree
+       ├─ Log::init()                    file, optional console
+       ├─ ClientConfig::load()           plus previous-crash detection
+       ├─ crash::install()               unhandled exception filter
+       ├─ sdk::bindGame()                declares the signatures it needs
+       ├─ Signatures::resolveAll()       scan, or reuse the disk cache
        ├─ ThemeManager::load()
-       ├─ bindServices()                 CPS, frametimes, stats, vie privée
-       ├─ ModuleManager::initialize()    construit le catalogue
-       ├─ ProfileManager::load()         + applique le profil actif
-       └─ HookManager::installAll()      SwapChain + fenêtre
+       ├─ bindServices()                 clicks, frame times, stats, privacy
+       ├─ ModuleManager::initialize()    builds the catalogue
+       ├─ ProfileManager::load()         and applies the active profile
+       └─ HookManager::installAll()      swapchain and window
 ```
 
-À partir de là, le client vit **sur le thread de rendu du jeu**, dans le détour
-de `Present`.
+From then on the client lives on the game's render thread, inside the Present
+detour.
 
----
-
-## La boucle de frame
+## The frame
 
 ```
-Present (détour)
+Present (detour)
   └─ Velyx::onPresent
        ├─ GraphicsContext::attach()      idempotent
-       ├─ WindowHook::attach()           première frame seulement
-       ├─ calcul du delta, lissage du FPS
-       ├─ emit FrameEvent                → SDK, services, animations
-       ├─ GraphicsContext::beginFrame()  acquiert le back buffer
-       │    ├─ emit RenderEvent          → éléments de HUD
-       │    └─ emit RenderTopEvent       → menu, notifications, palette
-       └─ GraphicsContext::endFrame()    rend le buffer et flush
+       ├─ WindowHook::attach()           first frame only
+       ├─ delta time, smoothed FPS
+       ├─ emit FrameEvent                SDK, services, animations
+       ├─ GraphicsContext::beginFrame()  acquires the back buffer
+       │    ├─ emit RenderEvent          HUD elements
+       │    └─ emit RenderTopEvent       menu, notifications, palette
+       └─ GraphicsContext::endFrame()    presents and flushes
 ```
 
-Le découpage `RenderEvent` / `RenderTopEvent` n'est pas cosmétique : les
-notifications et le menu doivent passer **au-dessus** du HUD, et rien d'autre ne
-garantit cet ordre.
+Splitting `RenderEvent` from `RenderTopEvent` is not cosmetic. Notifications and
+the menu have to sit above the HUD, and nothing else guarantees that ordering.
 
----
+## The overlay, and why D3D11On12
 
-## L'overlay : pourquoi D3D11On12
-
-Bedrock rend en D3D12. Direct2D ne sait pas dessiner sur une ressource D3D12.
-La chaîne est donc :
+Bedrock renders with D3D12. Direct2D cannot draw onto a D3D12 resource, so the
+chain is:
 
 ```
 ID3D12Resource (back buffer)
@@ -84,159 +75,134 @@ ID3D12Resource (back buffer)
 ID3D11Resource ──QueryInterface──▶ IDXGISurface
       │  ID2D1DeviceContext::CreateBitmapFromDxgiSurface
       ▼
-ID2D1Bitmap1  ← la cible de rendu de Velyx
+ID2D1Bitmap1  ← what Velyx draws into
 ```
 
-Deux détails coûtent cher si on les rate :
+Two details are expensive to get wrong:
 
-- **la file de commandes doit être celle du jeu**. D3D11On12 en exige une ;
-  en créer une nous-mêmes provoque un blocage au présent. D'où le hook sur
-  `ID3D12CommandQueue::ExecuteCommandLists`, qui est le seul endroit où le jeu
-  nous montre la sienne.
-- **les ressources enveloppées doivent être relâchées avant `ResizeBuffers`**,
-  sinon DXGI refuse le redimensionnement. Le détour de `ResizeBuffers` appelle
-  `releaseTargets()` avant de passer la main.
+* **The command queue has to be the game's.** D3D11On12 requires one, and
+  creating our own deadlocks on present. That is why
+  `ID3D12CommandQueue::ExecuteCommandLists` is hooked: it is the only place the
+  game shows us its queue.
+* **Wrapped resources must be released before `ResizeBuffers`,** otherwise DXGI
+  refuses the resize. The `ResizeBuffers` detour calls `releaseTargets()` first.
 
-Une ressource est acquise pour la durée de la passe overlay et rendue
-immédiatement après : les listes de commandes du jeu ne voient rien.
+A resource is acquired for the duration of the overlay pass and handed back
+immediately after, so the game's own command lists never notice.
 
-Le chemin D3D11 pur existe aussi et sert au cas où la fenêtre soit un swapchain
-D3D11 classique.
+There is also a plain D3D11 path, used when the swapchain is a normal D3D11 one.
 
----
+## Game addresses
 
-## Adresses du jeu
+Nothing is hard coded. `Signatures` is a registry: features declare what they
+need with `require("Actor::position")`, the byte patterns come from JSON, and the
+result is cached on disk keyed by game build plus pattern fingerprint. A full
+`.text` scan takes a few milliseconds thanks to anchoring `memchr` on the first
+concrete byte, and later launches skip the scan entirely.
 
-Rien n'est codé en dur. `Signatures` est un registre : les fonctionnalités
-déclarent ce dont elles ont besoin (`require("Actor::position")`), les motifs
-viennent d'un JSON, et le résultat est mis en cache sur disque, indexé par
-`version du jeu + empreinte du pack`. Un scan complet du `.text` prend quelques
-millisecondes grâce à l'ancrage `memchr` sur le premier octet concret ; les
-lancements suivants ne scannent pas du tout.
+Failure is always local:
 
-L'échec est *toujours* local :
+* an optional signature missing means its feature goes quiet;
+* a required one missing means reduced mode, a clear message, and the client
+  still starts;
+* an invalid pointer at runtime means `memory::readable()` returns a default
+  instead of dereferencing.
 
-- signature non requise absente → sa fonctionnalité se tait ;
-- signature requise absente → mode dégradé, message clair, le client démarre ;
-- pointeur invalide au runtime → `memory::readable()` renvoie une valeur par
-  défaut plutôt que de déréférencer.
+`sdk::Game` is the only façade that reads the game. Modules never read memory
+themselves; they read `game().player()` or `game().world()`, refreshed once per
+frame.
 
-`sdk::Game` est la seule façade qui lit le jeu. Un module ne fait jamais de
-lecture mémoire : il lit `game().player()` ou `game().world()`, rafraîchis une
-fois par frame.
+## Events
 
----
+`EventBus` is typed, synchronous, priority ordered and cancellable.
 
-## Événements
+Two properties are worth knowing:
 
-`EventBus` est typé, synchrone, trié par priorité, et supporte l'annulation.
-
-Deux propriétés méritent d'être connues :
-
-1. **les handlers tournent sans le verrou**. Un module peut réagir en
-   s'abonnant, en se désabonnant, ou en émettant un autre événement ; les
-   mutations sont mises en file et appliquées à la fin de l'émission.
-2. **un module désactivé ne coûte rien**. `Module::on()` enregistre une
-   *fabrique* d'abonnement, pas l'abonnement lui-même. Il est créé à
-   l'activation et détruit à la désactivation. C'est ce qui rend un catalogue de
-   150 modules viable.
-
----
+1. **Handlers run without the lock.** A module may subscribe, unsubscribe or emit
+   from inside a handler; mutations are queued and applied once the emit
+   finishes.
+2. **A disabled module costs nothing.** `Module::on()` registers a subscription
+   *factory*, not the subscription. It is created on enable and destroyed on
+   disable, which is what makes a large catalogue viable.
 
 ## Modules
 
 ```
-Module                      base : identité, réglages, keybind, permissions
- ├─ HudModule               + placement, ancrage, rotation, opacité, groupe
- │   └─ TextHud             + lignes libellé/valeur, alignement, mesure
+Module                      identity, settings, keybind, permissions
+ ├─ HudModule               placement, anchoring, rotation, opacity, group
+ │   └─ TextHud             label/value rows, alignment, measurement
  │       ├─ FpsHud
  │       ├─ CpsHud
  │       └─ …
- ├─ Zoom, FreeLook, …       modules de déplacement
- └─ ClickGui, HudEditor, …  surfaces du client (essentielles)
+ ├─ Zoom, FreeLook, …       movement modules
+ └─ ClickGui, HudEditor, …  client surfaces, marked essential
 ```
 
-`HudModule` implémente le placement une fois pour toutes : une sous-classe
-répond à « quelle taille fais-tu ? » et « dessine-toi ici », et hérite du reste.
-`TextHud` va plus loin pour le cas le plus fréquent. C'est la raison pour
-laquelle ajouter un compteur au HUD coûte vingt lignes et que tous s'alignent
-au pixel près quand on les empile.
+`HudModule` implements placement once for everyone. A subclass answers "how big
+are you?" and "draw yourself here", and inherits the rest. `TextHud` goes further
+for the common case. That is why adding a HUD readout is twenty lines and why
+they all line up to the pixel when stacked.
 
-Les réglages sont des `std::variant` décrits (libellé, plage, unité, condition
-de visibilité, mots-clés). Cette description unique alimente **à la fois**
-l'affichage dans le menu, la sérialisation JSON, la recherche et la palette de
-commandes — il n'y a pas de liste à tenir à jour ailleurs.
+Settings are described `std::variant`s (label, range, unit, visibility
+condition, keywords). That single description drives the menu, the JSON round
+trip, the search and the command palette, so there is no second list to keep in
+sync.
 
----
+## Profiles
 
-## Profils
+A profile holds every module's state and settings, the HUD layout and the theme.
+Switching disables everything and reloads, so no state leaks between profiles.
 
-Un profil contient l'état de tous les modules, leurs réglages, la disposition du
-HUD et le thème. Changer de profil désactive tout, puis recharge — aucun état ne
-fuit d'un profil à l'autre.
-
-- **Auto Profile Switch** : chaque profil déclare des sous-chaînes à comparer à
-  l'adresse et au nom du serveur rejoint ; la correspondance la plus longue
-  gagne, sinon le profil par défaut s'applique.
-- **Versionnage** : chaque bascule, import ou réinitialisation écrit d'abord un
-  point de restauration dans `profiles/<nom>/versions/`. Vingt sont conservés.
-- **Partage** : `VELYX1:<base64 du JSON>`, une seule ligne collable dans un chat.
-
----
+* **Automatic switching**: each profile declares substrings matched against the
+  address and name of the server you join. Longest match wins, otherwise the
+  default profile applies.
+* **Versioning**: every switch, import or reset writes a restore point into
+  `profiles/<name>/versions/` first. Twenty are kept.
+* **Sharing**: `VELYX1:<base64 json>`, one line, safe to paste into a chat.
 
 ## Interface
 
-`Ui` est une couche *immediate mode* : le menu est reconstruit à chaque frame.
-Il n'y a donc pas d'arbre de widgets à garder synchronisé avec la liste des
-modules — un module ajouté par un plugin apparaît sans inscription.
+`Ui` is an immediate mode layer: the menu is rebuilt every frame. There is no
+widget tree to keep in sync with the module list, so a module added by a plugin
+shows up with no registration step.
 
-Ce qui est conservé entre les frames est uniquement l'état d'interaction :
-quel widget est survolé, lequel est en cours de glissement, où en est chaque
-zone de défilement, et une valeur animée par widget. C'est cette dernière qui
-fait que l'interface *bouge* au lieu d'être simplement redessinée.
+What is retained is interaction state only: what is hovered, what is being
+dragged, where each scroll area sits, and one animated value per widget. That
+last one is what makes the interface move rather than merely redraw.
 
-Les identifiants de widget sont des hachages `nom + index`, ce qui permet à une
-ligne dans une boucle de garder son survol d'une frame à l'autre.
+Widget ids are hashes of a name plus an index, so a row inside a loop keeps its
+hover state from one frame to the next.
 
----
+## Themes
 
-## Thèmes
+`Theme` is a serialisable struct holding every visual decision: thirteen
+colours, four shape values, typography, effects and animation speed. No drawing
+code invents a colour or a radius; it all goes through `theme()`.
 
-`Theme` est une structure sérialisable qui contient **toutes** les décisions
-visuelles : treize couleurs, quatre valeurs de forme, la typographie, les effets
-et la vitesse d'animation. Aucun code de rendu n'invente une couleur ou un
-arrondi ; tout passe par `theme()`.
+That is what makes the theme editor a real feature rather than an accent colour
+picker. A theme can drop the blur, round differently, enlarge the text and
+disable animation, which is exactly what accessibility mode needs.
 
-C'est ce qui fait du créateur de thèmes une vraie fonctionnalité plutôt qu'un
-sélecteur de couleur d'accent : un thème peut supprimer le flou, arrondir
-autrement, agrandir le texte et désactiver les animations — ce dernier point
-étant exactement ce dont le mode accessibilité a besoin.
+## The launcher
 
----
+See the README for the principle. In code:
 
-## Le launcher
+* `InstanceManager` finds the installed game, clones it with hard links,
+  rewrites the manifest, registers, activates and injects;
+* `AccountStore` holds account labels and their binding to an instance, never a
+  token or a credential;
+* `main.cpp` is a Win32 window on an `ID2D1HwndRenderTarget`, with nothing to
+  install.
 
-Voir le README pour le principe. Côté code :
-
-- `InstanceManager` — découverte du jeu, clonage par liens durs, réécriture du
-  manifeste, enregistrement, activation, injection ;
-- `AccountStore` — étiquettes de comptes et liaison à une instance. Aucun jeton,
-  aucun identifiant, jamais ;
-- `main.cpp` — fenêtre Win32 + `ID2D1HwndRenderTarget`, sans dépendance à
-  installer.
-
-Les deux seules opérations qui passent par PowerShell sont `Get-AppxPackage` et
-`Add-AppxPackage -Register` : il n'existe pas d'équivalent C++ raisonnable sans
-tirer tout WinRT dans le binaire.
-
----
+The only two operations that go through PowerShell are `Get-AppxPackage` and
+`Add-AppxPackage -Register`. There is no reasonable C++ equivalent without
+pulling all of WinRT into the binary.
 
 ## Conventions
 
-- C++23, `namespace velyx`, `PascalCase` pour les types, `camelCase` pour les
-  fonctions et variables, `membre_` pour les champs privés.
-- Un fichier d'en-tête explique *pourquoi* la classe existe ; les commentaires
-  en ligne expliquent les décisions non évidentes, pas ce que le code dit déjà.
-- Les chaînes visibles par l'utilisateur sont en français, celles des journaux
-  aussi. Les identifiants de code, les clés JSON et les noms de signatures sont
-  en anglais et stables — ce sont des données, pas de l'affichage.
+* C++23, `namespace velyx`, `PascalCase` types, `camelCase` functions and
+  variables, `member_` for private fields.
+* Comments are rare and explain decisions, not syntax. If the code needs a
+  paragraph, the code is usually wrong.
+* Developer facing text (code, comments, logs, crash reports, commits, docs) is
+  English. The in game interface is French, which is its audience.

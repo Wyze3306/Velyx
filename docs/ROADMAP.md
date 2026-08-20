@@ -1,141 +1,134 @@
-# Feuille de route
+# Roadmap
 
-Votre liste de fonctionnalités, reprise ligne par ligne, avec son état réel et
-l'endroit où le code doit atterrir.
+Every feature on the original wish list, with where it stands and where the code
+goes.
 
-**Légende**
-
-| | Signification |
+| | Meaning |
 | --- | --- |
-| ✅ | Écrit, compilé, utilisable |
-| 🟡 | Le socle existe ; il reste le module ou l'écran à écrire (généralement < 150 lignes) |
-| ⬜ | À écrire entièrement |
+| ✅ | Written, compiled, usable |
+| 🟡 | The groundwork exists; a module or a screen is still missing |
+| ⬜ | Not written yet |
 
----
+## Configuration and profiles
 
-## Configuration et profils
-
-| Fonctionnalité | État | Où |
+| Feature | | Where |
 | --- | --- | --- |
-| Profile Manager | ✅ | `dll/config/ProfileManager.*` + page Profils |
-| Auto Profile Switch | ✅ | `ProfileManager::profileForServer`, plus longue correspondance |
-| Config Sharing (code + fichier) | ✅ | `exportCode` / `importCode`, format `VELYX1:` |
-| Config Versioning | ✅ | `snapshot` / `restore`, 20 points conservés |
-| Settings Search | ✅ | `ModuleManager::search`, cherche modules **et** réglages |
-| Favorites Modules | ✅ | `Module::setFavourite`, page Favoris |
-| Keybind Manager | ✅ | Page Raccourcis, avec mode bascule/maintien/impulsion |
-| Command Palette (Ctrl+K) | ✅ | `dll/ui/CommandPalette.*`, extensible via `registerCommand` |
-| Module Permissions | ✅ | `ModulePermissions`, affichées avant activation |
-| Safe Mode | ✅ | Deux plantages consécutifs → tout sauf l'essentiel désactivé |
+| Profile manager | ✅ | `dll/config/ProfileManager.*` and the Profiles page |
+| Auto profile switch | ✅ | `ProfileManager::profileForServer`, longest match wins |
+| Config sharing (code and file) | ✅ | `exportCode` / `importCode`, `VELYX1:` format |
+| Config versioning | ✅ | `snapshot` / `restore`, 20 restore points kept |
+| Settings search | ✅ | `ModuleManager::search`, matches modules **and** settings |
+| Favourite modules | ✅ | `Module::setFavourite`, Favourites page |
+| Keybind manager | ✅ | Keybinds page, with toggle / hold / press modes |
+| Command palette (Ctrl+K) | ✅ | `dll/ui/CommandPalette.*`, extensible via `registerCommand` |
+| Module permissions | ✅ | `ModulePermissions`, shown before you enable anything |
+| Safe mode | ✅ | Two crashes in a row disables everything non-essential |
+| Onboarding | ✅ | `dll/ui/Onboarding.*`, five steps, presets per play style |
 
-## Apparence
+## Appearance
 
-| Fonctionnalité | État | Où |
+| Feature | | Where |
 | --- | --- | --- |
-| HUD Editor avancé | ✅ | `dll/ui/HudEditor.*` — grille, aimantation, guides, groupes, flèches |
-| Placement libre, rotation, transparence | ✅ | `HudModule`, réglages partagés par tous les éléments |
-| Groupes d'éléments | ✅ | Réglage `group` ; déplacement solidaire dans l'éditeur |
-| Theme Creator | ✅ | `dll/ui/Theme.*` + page Thèmes, édition en direct |
-| Accessibility Mode | ✅ | Module `accessibility` : thème Contrast, échelle du texte, bordures épaisses, animations coupées |
-| Screen Filters (nuit, contraste, saturation, daltonisme) | ✅ | Module `screen_filters`, matrices de couleur D2D (protanopie, deutéranopie, tritanopie) |
-| Custom Sky | ⬜ | Nécessite un hook `SkyRenderer` (signature à fournir) |
-| Crosshair Designer | ⬜ | Module `HudModule` ; tout le dessin nécessaire existe dans `Renderer` |
-| Custom Hit Color | 🟡 | Module `custom_hit_color` écrit ; inerte tant que le hook `HurtColor` n'a pas de signature |
-| Custom Damage Tint | 🟡 | Module `damage_tint` écrit ; même dépendance |
+| Advanced HUD editor | ✅ | `dll/ui/HudEditor.*`, grid, snapping, guides, groups, arrow keys |
+| Free placement, rotation, opacity | ✅ | `HudModule`, shared by every element |
+| Element groups | ✅ | `group` setting, moved together in the editor |
+| Theme creator | ✅ | `dll/ui/Theme.*` and the Themes page, edited live |
+| Accessibility mode | ✅ | `accessibility` module: Contrast theme, text scale, thick borders, no motion |
+| Screen filters (night, contrast, saturation, colour blindness) | ✅ | `screen_filters`, D2D colour matrices |
+| Crosshair designer | ✅ | `crosshair`: six styles, outline, hit flash, dynamic spread |
+| Custom hit colour | 🟡 | `custom_hit_color` written, inert until the `HurtColor` hook has a signature |
+| Custom damage tint | 🟡 | `damage_tint`, same dependency |
+| Custom sky | ⬜ | Needs a `SkyRenderer` hook |
 
 ## Performance
 
-| Fonctionnalité | État | Où |
+| Feature | | Where |
 | --- | --- | --- |
-| FPS Graph (frametimes, freezes, 1 % lows) | ✅ | Module `fps_graph` + `FrameStats` |
-| Session Stats | ✅ | Module `session_stats` + service `SessionStats` |
-| Server Performance Monitor | 🟡 | Ping ✅. TPS estimé et pertes de paquets demandent le hook réseau (`PacketEvent` est déjà défini) |
-| Performance Mode | ✅ | Module `performance_mode` : seuils haut/bas, coupe flou, ombres et animations, rétablit au-dessus |
-| Battery Mode | ✅ | Module `battery_mode` : détection secteur/batterie, limiteur de framerate, effets coupés |
-| Benchmark intégré | ✅ | Module `benchmark` : mesure chronométrée, verdict et réglages proposés |
-| Playtime Tracker | ✅ | Service `Playtime` (agrégation jour/semaine/total), élément de HUD et graphique 14 jours |
+| FPS graph (frame times, freezes, 1% lows) | ✅ | `fps_graph` and `FrameStats` |
+| Session stats | ✅ | `session_stats` and the `SessionStats` service |
+| Performance mode | ✅ | `performance_mode`: thresholds both ways, drops blur, shadows and motion |
+| Battery mode | ✅ | `battery_mode`: mains detection, frame limiter, effects off |
+| Benchmark | ✅ | `benchmark`: timed run, verdict, suggested settings |
+| Playtime tracker | ✅ | `Playtime` service, HUD element and a 14 day chart |
+| Server performance monitor | 🟡 | Ping works. Estimated TPS and packet loss need the network hook (`PacketEvent` is defined) |
 
-## Capture et rejeu
+## Capture and replay
 
-| Fonctionnalité | État | Où |
+| Feature | | Where |
 | --- | --- | --- |
-| Screenshot Mode | ✅ | Module `screenshot_mode` : masque les éléments marqués, capture, notifie |
-| Screenshot Manager | 🟡 | Encodage PNG, rangement `<serveur>/<date>/` et énumération faits ; reste la galerie avec vignettes |
-| Replay System | ⬜ | Gros morceau : capture de frames encodée, à faire dans un thread dédié |
-| Instant Replay (30/60 s) | ⬜ | Tampon circulaire sur le back buffer ; raccourci déjà réservé (`ClientConfig::instantReplayKey`) |
-| Clip Markers | ⬜ | Raccourci déjà réservé (`clipMarkerKey`) ; écrit un horodatage dans le journal de session |
-| Match History | ✅ | Page **Historique** : serveur, durée, K/D, FPS moyen, blocs |
+| Screenshot mode | ✅ | `screenshot_mode`: hides marked elements, captures, notifies |
+| Screenshot manager | ✅ | PNG encoding, `<server>/<date>/` layout, thumbnail gallery on the Captures page |
+| Clip markers | ✅ | `clip_markers` and the `Clips` service, listed on the Captures page |
+| Match history | ✅ | History page: server, duration, K/D, average FPS, blocks |
+| Replay system | ⬜ | The big one: encoded frame capture on a dedicated thread |
+| Instant replay (30/60 s) | ⬜ | Ring buffer over the back buffer; the keybind is already reserved |
 
-## Monde et navigation
+## World and navigation
 
-| Fonctionnalité | État | Où |
+| Feature | | Where |
 | --- | --- | --- |
-| Advanced Waypoints | ⬜ | `Paths::waypoints()` réservé ; demande la projection monde → écran (`Render3DEvent`) |
-| World Notes | ⬜ | `Paths::notes()` réservé |
-| Friend Notes | ⬜ | Idem, stockage local par pseudo |
-| Favorite Servers / Quick Join | ⬜ | Demande le hook de l'écran multijoueur |
-| Resource Pack Manager | ⬜ | Demande les signatures `ResourcePackRepository` |
-| Shader Presets | ⬜ | Dépend du chargeur de shaders |
+| Advanced waypoints | ⬜ | `Paths::waypoints()` reserved; needs world to screen projection |
+| World notes | ⬜ | `Paths::notes()` reserved |
+| Friend notes | ⬜ | Same, keyed by player name |
+| Favourite servers, quick join | ⬜ | Needs the multiplayer screen hook |
+| Resource pack manager | ⬜ | Needs `ResourcePackRepository` signatures |
+| Shader presets | ⬜ | Depends on the shader loader |
 
-## Chat et son
+## Chat and sound
 
-| Fonctionnalité | État | Où |
+| Feature | | Where |
 | --- | --- | --- |
-| Chat Tabs | ⬜ | `ChatReceiveEvent` est défini et annulable ; reste le rendu du chat côté client |
-| Chat Search | ⬜ | Même socle |
-| Chat Mentions | ⬜ | Détection sur `ChatReceiveEvent` + `Notifications::push` — le plus court des quatre |
-| Chat Translator | ⬜ | Demande un accès réseau ; à déclarer dans les permissions du module |
-| Sound Visualizer | ⬜ | `SoundEvent` défini ; demande la signature `SoundEngine::play` |
-| Sound Mixer | ⬜ | Même hook, avec réécriture du volume |
+| Chat tabs | ⬜ | `ChatReceiveEvent` is defined and cancellable; client side chat rendering is missing |
+| Chat search | ⬜ | Same groundwork |
+| Chat mentions | ⬜ | Detection on `ChatReceiveEvent` plus `Notifications::push`, the shortest of the four |
+| Chat translator | ⬜ | Needs network access, declared in the module permissions |
+| Sound visualiser | ⬜ | `SoundEvent` defined; needs the `SoundEngine::play` signature |
+| Sound mixer | ⬜ | Same hook, rewriting the volume |
 
-## Vie privée
+## Privacy
 
-| Fonctionnalité | État | Où |
+| Feature | | Where |
 | --- | --- | --- |
-| Privacy Mode | ✅ | Module `privacy_mode` : masque serveur, pseudo et coordonnées |
-| Streamer Mode | ✅ | Module `streamer_mode` : confidentialité complète + filtrage du chat (adresses, invitations, mots interdits) |
+| Privacy mode | ✅ | `privacy_mode`: hides server, name and coordinates |
+| Streamer mode | ✅ | `streamer_mode`: full privacy plus chat filtering |
 
-## Extensibilité
+## Lifecycle
 
-| Fonctionnalité | État | Où |
+| Feature | | Where |
 | --- | --- | --- |
-| Plugin API | ⬜ | La catégorie `ModuleCategory::Script` et le modèle de permissions sont en place |
-| Scripting Lua / JS | ⬜ | Prévu en Lua (`external/` accueillerait la bibliothèque) ; l'API sûre s'expose via `Settings` et `EventBus` |
-| Marketplace | ⬜ | Dépend d'une infrastructure serveur, à traiter en dernier |
+| Notification centre | ✅ | `dll/ui/Notifications.*`, with history |
+| Crash reporter | ✅ | Exception filter, timestamped report naming the suspect module, panel in Diagnostics |
+| Update manager (stable, beta, nightly) | ✅ | `feature/Updates.*` reads the GitHub releases feed, channel picker in Diagnostics |
+| Changelog | 🟡 | Release notes are fetched and the page links out; an in client reader is still missing |
 
-## Cycle de vie
+## Extensibility
 
-| Fonctionnalité | État | Où |
+| Feature | | Where |
 | --- | --- | --- |
-| Notification Center | ✅ | `dll/ui/Notifications.*`, avec historique |
-| Crash Reporter | ✅ | Filtre d'exception, rapport horodaté nommant le module suspect, panneau dans **Diagnostic** |
-| Update Manager (stable/beta/nightly) | ⬜ | Le canal est déjà dans `ClientConfig` et dans la version compilée |
-| Changelog intégré | ⬜ | Une page de plus dans le menu |
-| Onboarding | ⬜ | `ClientConfig::onboardingCompleted` est déjà là et faux au premier lancement |
+| Plugin API | ⬜ | `ModuleCategory::Script` and the permission model are in place |
+| Lua scripting | ⬜ | The safe surface would be `Settings` plus `EventBus` |
+| Marketplace | ⬜ | Needs server infrastructure, last in line |
 
-## Modules du catalogue
+## The module catalogue
 
-Sur les ~104 modules listés pour la version PC :
+45 modules are written. Most of what is left falls into three buckets:
 
-- **42 sont écrits** (voir README) ;
-- **la grande majorité du reste sont des éléments de HUD**, c'est-à-dire des
-  sous-classes de `TextHud` d'une vingtaine de lignes chacune. Ce n'est pas de
-  la conception, c'est du remplissage — la partie difficile est faite ;
-- **les modules de rendu** (Fullbright, Nametag, View Model, Motion Blur, Fog
-  Color, Time Changer, Weather Changer, Block Outline, Chunk Border…) demandent
-  chacun une signature ou un hook spécifique. Ils sont donc bloqués sur le pack
-  de signatures, pas sur le code du client ;
-- **les modules serveur** (Hive Stats, Hive Utils, Zeqa Utils, Auto GG) demandent
-  le parsing du chat et du scoreboard, donc les hooks correspondants.
+- **HUD readouts**, which are twenty line `TextHud` subclasses. That is filling
+  in, not design work;
+- **render modules** (Fullbright, Nametag, View Model, Motion Blur, Fog Colour,
+  Time Changer, Weather Changer, Block Outline, Chunk Border), each needing its
+  own signature or hook. They are blocked on the signature pack, not on the
+  client;
+- **server modules** (Hive Stats, Hive Utils, Zeqa Utils, Auto GG), which need
+  chat and scoreboard parsing.
 
-## Ce qui vient ensuite, dans l'ordre
+## What comes next
 
-1. **Un pack de signatures pour la version de Bedrock visée.** C'est ce qui
-   débloque le plus de fonctionnalités par heure passée : sans lui, un tiers du
-   catalogue reste inerte quelle que soit la quantité de code écrite.
-2. **Le reste des éléments de HUD**, en série, sur `TextHud`.
-3. **Le chat côté client**, qui débloque d'un coup Chat Tabs, Search, Mentions,
-   Translator et Compact Chat.
-4. **Les modules de rendu**, au fur et à mesure que les signatures arrivent.
-5. **La galerie de captures** avec vignettes, au-dessus de `screenshot::gallery()`.
-6. **Replay et Instant Replay**, le plus gros morceau, à traiter isolément.
+1. **A signature pack for the target Bedrock build.** It unlocks more per hour
+   spent than anything else; without it a third of the catalogue stays inert no
+   matter how much code gets written.
+2. **The remaining HUD readouts**, in one pass, on `TextHud`.
+3. **Client side chat**, which unlocks tabs, search, mentions and the translator
+   in one go.
+4. **Render modules**, as signatures arrive.
+5. **Replay and instant replay**, handled on their own.

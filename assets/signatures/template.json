@@ -1,5 +1,5 @@
 {
-  "_comment": "Modèle de pack de signatures Velyx. Copiez-le en <majeure.mineure>.json (par ex. 1.21.json) et remplissez les motifs. Voir README.md.",
+  "_comment": "Velyx signature pack template. Copy it to <major.minor>.json (for example 1.21.json) and fill in the patterns. See README.md.",
 
   "signatures": {
     "ClientInstance::instance": {

@@ -1,76 +1,73 @@
-# Packs de signatures
+# Signature packs
 
-Velyx ne code en dur **aucune adresse mémoire du jeu**. Tout ce que le client
-lit dans Minecraft passe par un nom symbolique (`Actor::position`,
-`ClientInstance::instance`, …) résolu au démarrage à partir d'un fichier JSON.
+Velyx hard codes no game addresses. Everything it reads from Minecraft goes
+through a symbolic name (`Actor::position`, `ClientInstance::instance`, and so
+on) resolved at startup from a JSON file.
 
-Conséquence directe : quand Mojang publie une mise à jour, il n'y a **rien à
-recompiler**. Il suffit de déposer un nouveau fichier ici.
+The point is that a Mojang update needs a new file here, not a rebuild.
 
-## Où le fichier est cherché
+## Where the file is looked up
 
-Dans cet ordre, les trois sources se cumulent (la dernière gagne) :
+In this order, and the three sources merge with the last one winning:
 
-1. `<dossier de Velyx.dll>/assets/signatures/<majeure.mineure>.json` — le pack
-   livré avec la build ;
-2. `%APPDATA%/Velyx/assets/signatures/<majeure.mineure>.json` — un pack déposé
-   par l'utilisateur ;
-3. `%APPDATA%/Velyx/config/signatures.json` — surcharges locales, pratiques
-   pour corriger une seule entrée sans réécrire le pack.
+1. `<folder containing Velyx.dll>/assets/signatures/<major.minor>.json`, the pack
+   shipped with a build;
+2. `%APPDATA%/Velyx/assets/signatures/<major.minor>.json`, a pack the user
+   dropped in;
+3. `%APPDATA%/Velyx/config/signatures.json`, local overrides, handy for fixing a
+   single entry without rewriting the pack.
 
-`<majeure.mineure>` vient de la version du `Minecraft.Windows.exe` en cours
-d'exécution : pour `1.21.44.1`, Velyx cherche `1.21.json`.
+`<major.minor>` comes from the version resource of the running
+`Minecraft.Windows.exe`. For `1.21.44.1`, Velyx looks for `1.21.json`.
 
 ## Format
 
 ```jsonc
 {
   "signatures": {
-    // Forme courte : motif IDA, l'adresse trouvée est la cible.
+    // Short form: an IDA pattern, and the match address is the target.
     "LocalPlayer::sendChatMessage": "48 89 5C 24 ? 57 48 83 EC ?",
 
-    // Forme longue : le motif tombe sur une instruction qui *référence* la
-    // cible (call rel32, lea rip+disp32). Velyx suit le déplacement.
+    // Long form: the pattern lands on an instruction that *references* the
+    // target (call rel32, lea rip+disp32). Velyx follows the displacement.
     "ClientInstance::instance": {
       "pattern": "48 8B 0D ? ? ? ? 48 85 C9 74 ?",
       "kind": "relative",
-      "operand": 3,   // distance du début de l'instruction au disp32
-      "length": 7,    // longueur totale de l'instruction
-      "addend": 0     // ajouté à l'adresse finale
+      "operand": 3,   // distance from the instruction start to the disp32
+      "length": 7,    // total instruction length
+      "addend": 0     // added to the final address
     }
   },
 
   "offsets": {
-    // Décalages de champs, en octets, depuis le début de l'objet.
+    // Field offsets in bytes from the start of the object.
     "ClientInstance::localPlayer": 168,
     "Actor::position": 88
   }
 }
 ```
 
-`?` et `??` sont des jokers. La casse n'a pas d'importance.
+`?` and `??` are wildcards. Case does not matter.
 
-## Ce que Velyx fait quand une entrée manque
+## What happens when an entry is missing
 
-Rien de dramatique, et c'est volontaire :
+Nothing dramatic, and that is on purpose:
 
-- une signature **non requise** manquante désactive seulement la fonctionnalité
-  qui en dépend ;
-- une signature **requise** manquante fait démarrer le client en mode dégradé :
-  le menu, les thèmes, les profils et tous les modules purement côté client
-  (FPS, CPS, horloge, keystrokes, graphique de performance…) fonctionnent, mais
-  ceux qui lisent l'état du jeu affichent `--` ;
-- la page **Diagnostic** du menu liste chaque entrée, son propriétaire et
-  l'adresse résolue. C'est le point de départ pour compléter un pack.
+- a missing **optional** signature only disables the feature that needs it;
+- a missing **required** signature starts the client in reduced mode: the menu,
+  themes, profiles and every purely client side module (FPS, CPS, clock,
+  keystrokes, performance graph and the rest) still work, while modules that
+  read game state show `--`;
+- the **Diagnostics** page lists every entry, its owner and the resolved address.
+  That is where you start when filling in a pack.
 
-Un client qui refuse de démarrer parce que le jeu a bougé de 4 octets est un
-client cassé ; celui-ci vous le dit et continue.
+A client that refuses to boot because the game moved by four bytes is a broken
+client. This one tells you and carries on.
 
-## Écrire un pack
+## Writing a pack
 
-`template.json` liste tous les noms attendus avec des motifs vides. Remplissez
-ceux dont vous avez besoin — les entrées vides sont ignorées sans bruit.
+`template.json` lists every expected name with empty patterns. Fill in the ones
+you need; empty entries are ignored quietly.
 
-Un pack se valide en lançant le jeu et en ouvrant **Menu → Diagnostic** : chaque
-ligne verte est résolue, chaque ligne rouge est une signature requise qui ne
-correspond plus.
+To validate a pack, launch the game and open **Menu → Diagnostics**. Green rows are
+resolved, red rows are required signatures that no longer match.

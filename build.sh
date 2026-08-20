@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # Cross-compiles Velyx for Windows x64 from Linux using mingw-w64.
-#
-#   ./build.sh              release build
-#   ./build.sh debug        debug build with the in-game console
-#   ./build.sh clean        wipe the build directory first
+# See docs/BUILDING.md.
 
 set -euo pipefail
 
@@ -35,11 +32,11 @@ cmake -B "$BUILD_DIR" -G Ninja \
 
 cmake --build "$BUILD_DIR" -j"$(nproc)"
 
-# The DLL looks for its assets next to itself, so mirror them into the output.
+# The DLL looks for its assets next to itself.
 mkdir -p "$BUILD_DIR/bin/assets"
 cp -r assets/* "$BUILD_DIR/bin/assets/" 2>/dev/null || true
 
 echo
-echo "  $BUILD_DIR/bin/Velyx.dll   — the client"
-echo "  $BUILD_DIR/bin/Velyx.exe   — the launcher"
+echo "  $BUILD_DIR/bin/Velyx.dll   client"
+echo "  $BUILD_DIR/bin/Velyx.exe   launcher"
 echo

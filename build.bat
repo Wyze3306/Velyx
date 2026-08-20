@@ -1,8 +1,5 @@
 @echo off
-REM Builds Velyx on Windows with Visual Studio 2022 (x64).
-REM
-REM   build.bat            release
-REM   build.bat debug      debug build with the in-game console
+REM Builds Velyx on Windows with Visual Studio (x64). See docs/BUILDING.md.
 
 setlocal
 
@@ -26,8 +23,8 @@ if not exist "build\bin\%BUILD_TYPE%\assets" mkdir "build\bin\%BUILD_TYPE%\asset
 xcopy /E /I /Y assets "build\bin\%BUILD_TYPE%\assets" >nul
 
 echo.
-echo   build\bin\%BUILD_TYPE%\Velyx.dll  - the client
-echo   build\bin\%BUILD_TYPE%\Velyx.exe  - the launcher
+echo   build\bin\%BUILD_TYPE%\Velyx.dll  client
+echo   build\bin\%BUILD_TYPE%\Velyx.exe  launcher
 echo.
 goto :eof
 
