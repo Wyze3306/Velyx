@@ -29,10 +29,11 @@ constexpr int kWindowWidth = 940;
 constexpr int kWindowHeight = 620;
 constexpr float kRowHeight = 76.f;
 
-const Color kBackground = palette::kVoid;
-const Color kPanel = palette::kForest;
-const Color kSurface = palette::kMoss;
-const Color kBorder = palette::kSage;
+const Color kBackground = palette::kInk;
+const Color kPanel = palette::kSlate;
+const Color kSurface = palette::kGraphite;
+const Color kSurfaceHover = palette::kSteel;
+const Color kBorder = palette::kLine;
 const Color kAccent = palette::kMint;
 const Color kAccentDeep = palette::kJade;
 const Color kText = palette::kSnow;
@@ -54,6 +55,9 @@ int g_hotWidget = 0;
 int g_nextWidget = 0;
 
 int g_selected = -1;
+int g_menu = -1;
+int g_rowMenu = -1;
+std::vector<InstanceManager::VersionSource> g_versions;
 std::string g_status = "Prêt.";
 bool g_statusIsError = false;
 bool g_busy = false;
@@ -220,32 +224,214 @@ void drawInstanceRow(const Rect& rect, const Instance& instance, int index) {
     if (hovered) g_hotWidget = id;
 
     const bool selected = index == g_selected;
+    const bool running = instance.running();
 
-    fill(rect, selected ? Color::rgb8(18, 48, 31) : (hovered ? kSurface.fade(0.85f) : kPanel), 10.f);
-    if (selected) stroke(rect, kAccent.fade(0.8f), 10.f, 1.5f);
+    fill(rect, selected ? Color::rgb8(27, 30, 34) : kPanel, 14.f);
+    stroke(rect, selected ? Color::rgb8(51, 58, 66) : Color::rgb8(33, 36, 41), 14.f);
 
-    const Vec2 dot{rect.left + 22.f, rect.center().y};
-    fill(Rect::fromSize(dot.x - 4.f, dot.y - 4.f, 8.f, 8.f),
-         instance.running() ? kAccent : kTextMuted.fade(0.4f), 4.f);
+    static const Color kTints[4] = {palette::kMint, Color::rgb8(124, 140, 255),
+                                    palette::kHoney, Color::rgb8(232, 112, 158)};
+    const Color tint = kTints[index % 4];
 
-    write(instance.name, Rect{rect.left + 42.f, rect.top + 12.f, rect.right - 200.f, rect.top + 36.f},
+    const Rect avatar{rect.left + 16.f, rect.center().y - 20.f, rect.left + 56.f,
+                      rect.center().y + 20.f};
+    fill(avatar, tint.withAlpha(0.10f), 12.f);
+    stroke(avatar, tint.withAlpha(0.22f), 12.f);
+    write(instance.name.substr(0, 1), avatar, tint, g_fontTitle);
+
+    write(instance.name, Rect{rect.left + 70.f, rect.top + 16.f, rect.left + 260.f, rect.top + 38.f},
           kText, g_fontTitle);
 
     const Account* account = AccountStore::get().forInstance(instance.id);
-    const std::string subtitle =
-        std::string(account ? account->label : "Aucun compte associé") + "   ·   " +
-        (instance.gameVersion.empty() ? "version inconnue" : instance.gameVersion) +
-        (instance.registered ? "" : "   ·   non enregistrée");
-
-    write(subtitle, Rect{rect.left + 42.f, rect.top + 36.f, rect.right - 200.f, rect.bottom - 10.f},
+    write(account ? account->label : "Aucun compte associé",
+          Rect{rect.left + 70.f, rect.top + 38.f, rect.left + 260.f, rect.bottom - 14.f},
           kTextMuted, g_fontSmall);
 
-    const std::string right =
-        instance.running() ? "en cours" : (instance.lastPlayedMs > 0 ? "déjà jouée" : "jamais lancée");
-    write(right, Rect{rect.right - 190.f, rect.top, rect.right - 20.f, rect.bottom},
-          instance.running() ? kAccent : kTextMuted, g_fontSmall);
+    const Rect chip{rect.left + 276.f, rect.center().y - 15.f, rect.left + 386.f,
+                    rect.center().y + 15.f};
+    const bool menuOpen = g_menu == index;
+    const bool chipHover = chip.contains(g_mouse);
 
-    if (hovered && g_clicked) g_selected = index;
+    fill(chip, menuOpen || chipHover ? kSurfaceHover : kSurface, 9.f);
+    stroke(chip, menuOpen ? kAccent.withAlpha(0.5f) : kBorder, 9.f);
+    write(instance.gameVersion.empty() ? "version inconnue" : instance.gameVersion,
+          Rect{chip.left + 10.f, chip.top, chip.right - 10.f, chip.bottom}, kText, g_fontSmall);
+
+    if (chipHover && g_clicked) {
+        g_selected = index;
+        g_menu = menuOpen ? -1 : index;
+        if (g_menu == index) g_versions = InstanceManager::availableVersions();
+    }
+
+    const Rect more{rect.left + 394.f, rect.center().y - 15.f, rect.left + 424.f,
+                    rect.center().y + 15.f};
+    const bool moreHover = more.contains(g_mouse);
+    if (moreHover || g_rowMenu == index) fill(more, kSurfaceHover, 9.f);
+    for (int d = 0; d < 3; ++d) {
+        fill(Rect::fromSize(more.center().x - 6.f + static_cast<float>(d) * 5.f,
+                            more.center().y - 1.5f, 3.f, 3.f),
+             moreHover ? kText : kTextMuted, 1.5f);
+    }
+    if (moreHover && g_clicked) {
+        g_selected = index;
+        g_menu = -1;
+        g_rowMenu = g_rowMenu == index ? -1 : index;
+    }
+
+    const Vec2 dot{rect.left + 442.f, rect.center().y};
+    fill(Rect::fromSize(dot.x - 3.f, dot.y - 3.f, 6.f, 6.f), running ? kAccent : Color::rgb8(58, 64, 72), 3.f);
+
+    std::string state = "Prête";
+    if (running) {
+        state = "En cours · pid " + std::to_string(instance.pid);
+    } else if (!instance.registered) {
+        state = "Non enregistrée";
+    }
+    write(state, Rect{rect.left + 456.f, rect.top, rect.left + 640.f, rect.bottom},
+          running ? kAccent : kTextMuted, g_fontSmall);
+
+    if (running) {
+        const Rect stop{rect.right - 52.f, rect.center().y - 16.f, rect.right - 16.f,
+                        rect.center().y + 16.f};
+        fill(stop, stop.contains(g_mouse) ? kSurfaceHover : Color{0.f, 0.f, 0.f, 0.f}, 9.f);
+        stroke(stop, kBorder, 9.f);
+        fill(Rect::fromSize(stop.center().x - 5.f, stop.center().y - 5.f, 10.f, 10.f), kTextMuted, 2.f);
+
+        const Rect focus{rect.right - 140.f, rect.center().y - 16.f, rect.right - 60.f,
+                         rect.center().y + 16.f};
+        fill(focus, focus.contains(g_mouse) ? kSurfaceHover : Color{0.f, 0.f, 0.f, 0.f}, 9.f);
+        stroke(focus, kBorder, 9.f);
+        write("Focus", focus, kTextMuted, g_fontBody);
+
+        if (stop.contains(g_mouse) && g_clicked) {
+            Process::terminate(instance.pid);
+            setStatus("« " + instance.name + " » arrêtée.");
+        }
+    } else {
+        const Rect play{rect.right - 116.f, rect.center().y - 16.f, rect.right - 16.f,
+                        rect.center().y + 16.f};
+        const bool playHover = play.contains(g_mouse);
+        fill(play, playHover ? kAccent.lighten(0.06f) : kAccent, 9.f);
+        write("Jouer", play, kAccent.readableForeground(), g_fontBody);
+
+        if (playHover && g_clicked) {
+            g_selected = index;
+            launchSelected();
+        }
+    }
+
+    if (hovered && g_clicked && !chipHover && !moreHover) g_selected = index;
+}
+
+void drawRowMenu(const Rect& rowRect, int index) {
+    if (g_rowMenu != index) return;
+
+    auto& manager = InstanceManager::get();
+    if (index >= static_cast<int>(manager.all().size())) return;
+
+    const Rect menu{rowRect.left + 394.f, rowRect.center().y + 18.f, rowRect.left + 604.f,
+                    rowRect.center().y + 122.f};
+
+    fill(menu.translated({0.f, 3.f}), Color::rgb8(0, 0, 0, 90), 12.f);
+    fill(menu, Color::rgb8(23, 25, 29), 12.f);
+    stroke(menu, Color::rgb8(46, 52, 59), 12.f);
+
+    static const char* kLabels[3] = {"Associer un compte", "Ouvrir le dossier", "Supprimer"};
+
+    float y = menu.top + 6.f;
+    for (int i = 0; i < 3; ++i) {
+        const Rect item{menu.left + 4.f, y, menu.right - 4.f, y + 30.f};
+        y += 30.f;
+
+        const bool itemHover = item.contains(g_mouse);
+        if (itemHover) fill(item, kSurfaceHover, 8.f);
+
+        write(kLabels[i], Rect{item.left + 10.f, item.top, item.right - 10.f, item.bottom},
+              i == 2 ? kDanger : kTextMuted, g_fontSmall);
+
+        if (!itemHover || !g_clicked) continue;
+
+        g_rowMenu = -1;
+        g_selected = index;
+
+        if (i == 0) {
+            bindAccountToSelected();
+        } else if (i == 1) {
+            ShellExecuteW(nullptr, L"open",
+                          manager.all()[static_cast<size_t>(index)].root.wstring().c_str(), nullptr,
+                          nullptr, SW_SHOWNORMAL);
+        } else {
+            removeSelected();
+        }
+        return;
+    }
+}
+
+void drawVersionMenu(const Rect& rowRect, int index) {
+    if (g_menu != index) return;
+
+    const float height = 30.f + static_cast<float>(g_versions.size()) * 30.f + 40.f;
+    const Rect menu{rowRect.left + 276.f, rowRect.center().y + 18.f, rowRect.left + 484.f,
+                    rowRect.center().y + 18.f + height};
+
+    fill(menu.translated({0.f, 3.f}), Color::rgb8(0, 0, 0, 90), 12.f);
+    fill(menu, Color::rgb8(23, 25, 29), 12.f);
+    stroke(menu, Color::rgb8(46, 52, 59), 12.f);
+
+    write("VERSIONS DISPONIBLES",
+          Rect{menu.left + 12.f, menu.top + 6.f, menu.right - 12.f, menu.top + 28.f}, kTextMuted,
+          g_fontSmall);
+
+    auto& manager = InstanceManager::get();
+    Instance* instance = manager.find(manager.all()[static_cast<size_t>(index)].id);
+
+    float y = menu.top + 30.f;
+    for (const auto& source : g_versions) {
+        const Rect item{menu.left + 4.f, y, menu.right - 4.f, y + 30.f};
+        y += 30.f;
+
+        const bool current = instance && source.version == instance->gameVersion;
+        const bool itemHover = item.contains(g_mouse);
+
+        if (itemHover) fill(item, kSurfaceHover, 8.f);
+
+        write(source.version, Rect{item.left + 10.f, item.top, item.right - 40.f, item.bottom},
+              current ? kText : kTextMuted, g_fontSmall);
+
+        if (source.installed) {
+            write("installée", Rect{item.right - 90.f, item.top, item.right - 26.f, item.bottom},
+                  Color::rgb8(90, 98, 108), g_fontSmall);
+        }
+        if (current) {
+            fill(Rect::fromSize(item.right - 20.f, item.center().y - 3.f, 6.f, 6.f), kAccent, 3.f);
+        }
+
+        if (itemHover && g_clicked && instance && !current) {
+            g_menu = -1;
+            setStatus("Passage de « " + instance->name + " » en " + source.version + "…");
+
+            std::string error;
+            if (manager.setVersion(*instance, source, nullptr, &error)) {
+                setStatus("« " + instance->name + " » est maintenant en " + source.version + ".");
+            } else {
+                setStatus(error, true);
+            }
+        }
+    }
+
+    const Rect add{menu.left + 4.f, y + 4.f, menu.right - 4.f, y + 34.f};
+    if (add.contains(g_mouse)) fill(add, kSurfaceHover, 8.f);
+    write("Ajouter un dossier de version",
+          Rect{add.left + 10.f, add.top, add.right - 10.f, add.bottom}, kTextMuted, g_fontSmall);
+
+    if (add.contains(g_mouse) && g_clicked) {
+        std::error_code ec;
+        std::filesystem::create_directories(Paths::versions(), ec);
+        ShellExecuteW(nullptr, L"open", Paths::versions().wstring().c_str(), nullptr, nullptr,
+                      SW_SHOWNORMAL);
+        setStatus("Déposez un dossier de jeu décompressé dans versions/, puis rouvrez ce menu.");
+        g_menu = -1;
+    }
 }
 
 void render(const Rect& client) {
@@ -256,133 +442,101 @@ void render(const Rect& client) {
 
     fill(client, kBackground);
 
-    const Rect header{client.left, client.top, client.right, client.top + 72.f};
-    fill(header, kPanel);
-    fill(Rect{header.left, header.bottom - 1.f, header.right, header.bottom}, kBorder.fade(0.7f));
+    const Rect title{client.left, client.top, client.right, client.top + 38.f};
+    fill(title, kPanel);
+    fill(Rect{title.left, title.bottom - 1.f, title.right, title.bottom}, Color::rgb8(30, 34, 39));
 
+    const Vec2 mark{title.left + 22.f, title.center().y};
     g_brush->SetColor(toD2D(kAccent));
-    const Vec2 mark{header.left + 34.f, header.center().y};
-    g_target->DrawLine(D2D1::Point2F(mark.x - 10.f, mark.y - 10.f),
-                       D2D1::Point2F(mark.x, mark.y + 10.f), g_brush, 3.f);
-    g_target->DrawLine(D2D1::Point2F(mark.x, mark.y + 10.f),
-                       D2D1::Point2F(mark.x + 10.f, mark.y - 10.f), g_brush, 3.f);
+    g_target->DrawLine(D2D1::Point2F(mark.x - 7.f, mark.y - 7.f),
+                       D2D1::Point2F(mark.x, mark.y + 7.f), g_brush, 2.4f);
+    g_target->DrawLine(D2D1::Point2F(mark.x, mark.y + 7.f),
+                       D2D1::Point2F(mark.x + 7.f, mark.y - 7.f), g_brush, 2.4f);
 
-    write("VELYX", Rect{header.left + 58.f, header.top + 16.f, header.left + 200.f,
-                        header.top + 44.f},
-          kText, g_fontHeading);
-    write("Launcher " + std::string(version::kString),
-          Rect{header.left + 58.f, header.top + 40.f, header.left + 260.f, header.bottom - 10.f},
-          kTextMuted, g_fontSmall);
-
-    const bool devMode = InstanceManager::developerModeEnabled();
-    write(devMode ? "Mode développeur activé" : "Mode développeur désactivé",
-          Rect{header.right - 300.f, header.top, header.right - 24.f, header.bottom},
-          devMode ? kAccent : kDanger, g_fontSmall);
-
-    const Rect body{client.left + 24.f, header.bottom + 20.f, client.right - 300.f,
-                    client.bottom - 64.f};
-
-    write("INSTANCES", Rect{body.left, body.top, body.right, body.top + 20.f}, kTextMuted,
+    write("VELYX", Rect{title.left + 38.f, title.top, title.left + 140.f, title.bottom}, kText,
           g_fontSmall);
 
-    const Rect list{body.left, body.top + 26.f, body.right, body.bottom};
+    const Rect header{client.left + 24.f, title.bottom + 22.f, client.right - 24.f,
+                      title.bottom + 68.f};
 
-    if (manager.all().empty()) {
-        fill(list, kPanel.fade(0.6f), 10.f);
-        write("Aucune instance pour l'instant.\n"
-              "Créez-en une à droite : Velyx copie le jeu installé, lui donne une identité "
-              "de paquet distincte, et Windows accepte alors de la lancer en parallèle.",
-              list.inflated(-24.f), kTextMuted, g_fontBody);
-    } else {
-        float y = list.top - g_scroll;
-        for (size_t i = 0; i < manager.all().size(); ++i) {
-            const Rect row{list.left, y, list.right, y + kRowHeight - 8.f};
-            y += kRowHeight;
+    write("Instances", Rect{header.left, header.top, header.left + 220.f, header.top + 30.f}, kText,
+          g_fontHeading);
 
-            if (row.bottom < list.top || row.top > list.bottom) continue;
-            drawInstanceRow(row, manager.all()[i], static_cast<int>(i));
-        }
-    }
-
-    const Rect side{client.right - 276.f, header.bottom + 20.f, client.right - 24.f,
-                    client.bottom - 64.f};
-
-    write("NOUVELLE INSTANCE", Rect{side.left, side.top, side.right, side.top + 20.f}, kTextMuted,
+    const int live = static_cast<int>(std::ranges::count_if(
+        manager.all(), [](const Instance& i) { return i.running(); }));
+    write(std::to_string(manager.all().size()) + " instances · " + std::to_string(live) +
+              " en cours · " + std::to_string(AccountStore::get().all().size()) + " comptes",
+          Rect{header.left, header.top + 26.f, header.left + 320.f, header.bottom}, kTextMuted,
           g_fontSmall);
 
-    const Rect nameField{side.left, side.top + 26.f, side.right, side.top + 62.f};
-    fill(nameField, kSurface, 8.f);
-    stroke(nameField, g_editingName ? kAccent : kBorder.fade(0.6f), 8.f);
+    const Rect nameField{header.right - 396.f, header.center().y - 17.f, header.right - 178.f,
+                         header.center().y + 17.f};
+    fill(nameField, kSurface, 999.f);
+    stroke(nameField, g_editingName ? kAccent.withAlpha(0.6f) : kBorder, 999.f);
+    write(g_newInstanceName.empty() ? "Nom de la nouvelle instance" : g_newInstanceName,
+          Rect{nameField.left + 14.f, nameField.top, nameField.right - 12.f, nameField.bottom},
+          g_newInstanceName.empty() ? Color::rgb8(92, 100, 110) : kText, g_fontBody);
 
     if (nameField.contains(g_mouse) && g_clicked) g_editingName = true;
     else if (g_clicked && !nameField.contains(g_mouse)) g_editingName = false;
 
-    write(g_newInstanceName.empty() ? "Nom de l'instance" : g_newInstanceName,
-          Rect{nameField.left + 12.f, nameField.top, nameField.right - 12.f, nameField.bottom},
-          g_newInstanceName.empty() ? kTextMuted.fade(0.7f) : kText, g_fontBody);
-
-    if (button(Rect{side.left, side.top + 72.f, side.right, side.top + 110.f}, "Créer l'instance",
-               true, !g_busy)) {
+    if (button(Rect{header.right - 168.f, header.center().y - 17.f, header.right,
+                    header.center().y + 17.f},
+               "Nouvelle instance", true, !g_busy)) {
         createInstance();
     }
 
-    write("ACTIONS", Rect{side.left, side.top + 130.f, side.right, side.top + 150.f}, kTextMuted,
-          g_fontSmall);
+    const Rect list{client.left + 24.f, header.bottom + 16.f, client.right - 24.f,
+                    client.bottom - 62.f};
 
-    const bool hasSelection = g_selected >= 0 &&
-                              g_selected < static_cast<int>(manager.all().size());
+    if (manager.all().empty()) {
+        fill(list, kPanel.withAlpha(0.6f), 14.f);
+        write("Aucune instance pour l'instant.\n"
+              "Velyx copie le jeu installé par liens durs, lui donne une identité de paquet "
+              "distincte, et Windows accepte alors de les lancer en parallèle.",
+              list.inflated(-28.f), kTextMuted, g_fontBody);
+    } else {
+        float y = list.top - g_scroll;
+        for (size_t i = 0; i < manager.all().size(); ++i) {
+            const Rect row{list.left, y, list.right, y + 76.f};
+            y += 86.f;
+            if (row.bottom < list.top || row.top > list.bottom) continue;
+            drawInstanceRow(row, manager.all()[i], static_cast<int>(i));
+        }
 
-    if (button(Rect{side.left, side.top + 156.f, side.right, side.top + 194.f}, "Lancer", true,
-               hasSelection && !g_busy)) {
-        launchSelected();
-    }
-    if (button(Rect{side.left, side.top + 202.f, side.right, side.top + 238.f},
-               "Associer un compte", false, hasSelection)) {
-        bindAccountToSelected();
-    }
-    if (button(Rect{side.left, side.top + 246.f, side.right, side.top + 282.f},
-               "Ouvrir le dossier", false, hasSelection)) {
-        const auto& instance = manager.all()[static_cast<size_t>(g_selected)];
-        ShellExecuteW(nullptr, L"open", instance.root.wstring().c_str(), nullptr, nullptr,
-                      SW_SHOWNORMAL);
-    }
-    if (button(Rect{side.left, side.top + 290.f, side.right, side.top + 326.f}, "Supprimer", false,
-               hasSelection)) {
-        removeSelected();
-    }
-
-    write("COMPTES", Rect{side.left, side.top + 348.f, side.right, side.top + 368.f}, kTextMuted,
-          g_fontSmall);
-
-    float accountY = side.top + 374.f;
-    for (const Account* account : AccountStore::get().recent()) {
-        if (accountY + 30.f > side.bottom) break;
-
-        const Rect row{side.left, accountY, side.right, accountY + 28.f};
-        accountY += 32.f;
-
-        const Color chip = Color::fromHex(account->colorHex, kAccent);
-        fill(Rect{row.left, row.top + 8.f, row.left + 10.f, row.top + 18.f}, chip, 5.f);
-
-        write(account->label, Rect{row.left + 18.f, row.top, row.right - 60.f, row.bottom}, kText,
-              g_fontSmall);
-        write(account->instanceId.empty() ? "libre" : "liée",
-              Rect{row.right - 60.f, row.top, row.right, row.bottom}, kTextMuted, g_fontSmall);
+        y = list.top - g_scroll;
+        for (size_t i = 0; i < manager.all().size(); ++i) {
+            const Rect row{list.left, y, list.right, y + 76.f};
+            y += 86.f;
+            drawVersionMenu(row, static_cast<int>(i));
+            drawRowMenu(row, static_cast<int>(i));
+        }
     }
 
-    const Rect status{client.left, client.bottom - 44.f, client.right, client.bottom};
+    const Rect status{client.left, client.bottom - 46.f, client.right, client.bottom};
     fill(status, kPanel);
-    fill(Rect{status.left, status.top, status.right, status.top + 1.f}, kBorder.fade(0.7f));
+    fill(Rect{status.left, status.top, status.right, status.top + 1.f}, Color::rgb8(30, 34, 39));
 
-    write(g_status, Rect{status.left + 24.f, status.top, status.right - 24.f, status.bottom},
+    write(g_status, Rect{status.left + 24.f, status.top, status.right - 240.f, status.bottom},
           g_statusIsError ? kDanger : kTextMuted, g_fontSmall);
+
+    const bool devMode = InstanceManager::developerModeEnabled();
+    const Rect pill{status.right - 220.f, status.center().y - 12.f, status.right - 24.f,
+                    status.center().y + 12.f};
+    fill(pill, (devMode ? kAccent : kDanger).withAlpha(0.10f), 999.f);
+    stroke(pill, (devMode ? kAccent : kDanger).withAlpha(0.22f), 999.f);
+    write(devMode ? "Mode développeur actif" : "Mode développeur désactivé", pill,
+          devMode ? kAccent : kDanger, g_fontSmall);
 }
 
 IDWriteTextFormat* makeFormat(float size, DWRITE_FONT_WEIGHT weight,
                               DWRITE_PARAGRAPH_ALIGNMENT paragraph = DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
                               DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING) {
     IDWriteTextFormat* format = nullptr;
-    if (FAILED(g_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, weight,
+    if (FAILED(g_dwriteFactory->CreateTextFormat(L"Space Grotesk", nullptr, weight,
+                                                 DWRITE_FONT_STYLE_NORMAL,
+                                                 DWRITE_FONT_STRETCH_NORMAL, size, L"", &format)) &&
+        FAILED(g_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, weight,
                                                  DWRITE_FONT_STYLE_NORMAL,
                                                  DWRITE_FONT_STRETCH_NORMAL, size, L"", &format))) {
         return nullptr;
