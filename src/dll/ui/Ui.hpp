@@ -60,6 +60,10 @@ public:
 
     bool toggle(const UiId& id, const Rect& rect, bool& value);
 
+    bool chip(const UiId& id, const Rect& rect, std::string_view label, bool selected);
+
+    bool resetButton(const UiId& id, const Rect& rect, bool visible);
+
     bool toggleRow(const UiId& id, const Rect& rect, std::string_view label,
                    std::string_view description, bool& value);
 

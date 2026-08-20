@@ -12,7 +12,7 @@ namespace {
 
 constexpr float kRowLabelSize = 14.f;
 constexpr float kRowDescriptionSize = 11.5f;
-constexpr float kSwitchWidth = 38.f;
+constexpr float kSwitchWidth = 34.f;
 constexpr float kSwitchHeight = 20.f;
 
 FontSpec makeFont(float size, FontWeight weight, TextAlign align, TextVAlign valign) {
@@ -181,11 +181,11 @@ bool Ui::button(const UiId& id, const Rect& rect, std::string_view label, bool p
     Color foreground;
 
     if (primary) {
-        background = lerp(active.liveAccentDeep(), active.liveAccent(), hover);
+        background = hover > 0.5f ? active.liveAccent().lighten(0.06f) : active.liveAccent();
         foreground = background.readableForeground();
     } else {
-        background = lerp(active.surface, active.surfaceHover, hover);
-        foreground = active.text;
+        background = active.surfaceHover.fade(hover * 0.8f);
+        foreground = lerp(active.textMuted, active.text, hover);
     }
 
     if (!enabled) {
@@ -195,12 +195,12 @@ bool Ui::button(const UiId& id, const Rect& rect, std::string_view label, bool p
 
     renderer_->fillRounded(rect, background, active.radius);
     if (!primary) {
-        renderer_->strokeRounded(rect, active.border.fade(0.5f + hover * 0.5f), active.radius,
+        renderer_->strokeRounded(rect, active.border.fade(0.7f + hover * 0.3f), active.radius,
                                  active.borderWidth);
     }
 
     renderer_->text(label, rect, foreground,
-                    makeFont(13.f, FontWeight::SemiBold, TextAlign::Center, TextVAlign::Middle));
+                    makeFont(12.5f, FontWeight::SemiBold, TextAlign::Center, TextVAlign::Middle));
 
     return pressed;
 }
@@ -233,10 +233,8 @@ bool Ui::toggle(const UiId& id, const Rect& rect, bool& value) {
     const float on = animate(UiId("toggle_state", static_cast<int>(id.value)), value, 18.f);
     const float hover = animate(id, hovered(id));
 
-    const Color trackColor = lerp(active.surface, active.liveAccent(), on);
+    const Color trackColor = lerp(active.border, active.liveAccent(), on);
     renderer_->fillRounded(track, trackColor, track.height() * 0.5f);
-    renderer_->strokeRounded(track, active.border.fade(0.6f - on * 0.4f), track.height() * 0.5f,
-                             active.borderWidth);
 
     const float knobRadius = track.height() * 0.5f - 3.f;
     const float knobX = lerp(track.left + knobRadius + 3.f, track.right - knobRadius - 3.f, on);
@@ -247,7 +245,7 @@ bool Ui::toggle(const UiId& id, const Rect& rect, bool& value) {
     }
 
     renderer_->fillCircle({knobX, track.center().y}, knobRadius,
-                          on > 0.5f ? trackColor.readableForeground() : active.textMuted);
+                          lerp(active.textMuted, trackColor.readableForeground(), on));
 
     return pressed;
 }
@@ -318,8 +316,8 @@ bool Ui::slider(const UiId& id, const Rect& rect, float& value, float minimum, f
     }
 
     const Vec2 knob{filled.right, track.center().y};
-    renderer_->fillCircle(knob, 7.f + hover * 1.5f, active.liveAccent());
-    renderer_->fillCircle(knob, 3.f + hover * 0.5f, active.liveAccent().readableForeground());
+    renderer_->fillCircle(knob, 8.f + hover * 2.f, active.backgroundDeep.withAlpha(0.45f));
+    renderer_->fillCircle(knob, 6.f + hover * 0.5f, active.text);
 
     if (!suffix.empty() || hover > 0.01f) {
         const std::string label =
@@ -709,6 +707,50 @@ int Ui::segmented(const UiId& id, const Rect& rect, const std::vector<std::strin
     }
 
     return result;
+}
+
+bool Ui::chip(const UiId& id, const Rect& rect, std::string_view label, bool selected) {
+    const auto& active = theme();
+    const bool pressed = hoverAndClick(id, rect);
+    const float hover = animate(id, hovered(id));
+    const float on = animate(UiId("chip_on", static_cast<int>(id.value)), selected, 20.f);
+
+    const float radius = rect.height() * 0.5f;
+
+    if (on > 0.01f) {
+        renderer_->fillRounded(rect, active.liveAccent().fade(0.12f * on), radius);
+        renderer_->strokeRounded(rect, active.liveAccent().fade(0.24f * on), radius,
+                                 active.borderWidth);
+    } else if (hover > 0.01f) {
+        renderer_->fillRounded(rect, active.surfaceHover.fade(0.55f * hover), radius);
+    }
+
+    const Color idle = lerp(active.textDim, active.text, hover);
+    renderer_->text(label, rect, lerp(idle, active.liveAccent(), on),
+                    makeFont(12.f, selected ? FontWeight::SemiBold : FontWeight::Medium,
+                             TextAlign::Center, TextVAlign::Middle));
+
+    return pressed;
+}
+
+bool Ui::resetButton(const UiId& id, const Rect& rect, bool visible) {
+    const auto& active = theme();
+    const float show = animate(UiId("reset_show", static_cast<int>(id.value)), visible, 18.f);
+    if (show <= 0.01f) return false;
+
+    const bool pressed = hoverAndClick(id, rect, visible);
+    const float hover = animate(id, hovered(id));
+
+    const Vec2 centre = rect.center();
+    const Color colour = lerp(active.textDim, active.text, hover).fade(show);
+
+    renderer_->arc(centre, 5.5f, 1.4f, 40.f, 285.f, colour);
+    renderer_->fillPolygon({{centre.x + 4.f, centre.y - 7.5f},
+                            {centre.x + 8.f, centre.y - 3.5f},
+                            {centre.x + 2.5f, centre.y - 3.f}},
+                           colour);
+
+    return pressed;
 }
 
 float Ui::beginScroll(const UiId& id, const Rect& rect, float contentHeight) {
