@@ -1,0 +1,231 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #3DDC84; text-decoration: none; }
+    a:hover { color: #7CFFB2; }
+    * { box-sizing: border-box; }
+    input { font-family: inherit; }
+    input::placeholder { color: #5C646E; }
+    input:focus { outline: none; }
+    .vx-inst:hover { background: #1B1E22 !important; }
+    .vx-menu-item:hover { background: #24282D !important; }
+    .vx-ghost:hover { background: #24282D !important; color: #ECEFF2 !important; }
+    .vx-play:hover { filter: brightness(1.08); }
+  </style>
+</helmet>
+
+<div style="width: 1040px; height: 680px; display: flex; flex-direction: column; background: #0E0F11; border: 1px solid #23272C; border-radius: 12px; overflow: hidden; font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif; color: #ECEFF2;">
+
+  <div style="display: flex; align-items: center; height: 38px; padding: 0 12px 0 14px; background: #131518; border-bottom: 1px solid #1E2227; flex-shrink: 0;">
+    <svg width="15" height="15" viewBox="0 0 20 20" fill="none"><path d="M3 4.5L10 16L17 4.5" stroke="{{accent}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; margin-left: 9px;">VELYX</span>
+    <div style="flex-grow: 1;"></div>
+    <span style="display: flex; align-items: center; justify-content: center; width: 26px; height: 22px; border-radius: 6px; color: #6B7480;">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1 5h8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+    </span>
+    <span style="display: flex; align-items: center; justify-content: center; width: 26px; height: 22px; border-radius: 6px; color: #6B7480;">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1.2" y="1.2" width="7.6" height="7.6" rx="1.2" stroke="currentColor" stroke-width="1.3"/></svg>
+    </span>
+    <span style="display: flex; align-items: center; justify-content: center; width: 26px; height: 22px; border-radius: 6px; color: #6B7480;">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+    </span>
+  </div>
+
+  <div style="display: flex; align-items: flex-end; gap: 16px; padding: 24px 24px 18px 24px; flex-shrink: 0;">
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <span style="font-size: 22px; font-weight: 600; letter-spacing: -0.02em;">Instances</span>
+      <span style="font-size: 12px; color: #6B7480;">{{summary}}</span>
+    </div>
+    <div style="flex-grow: 1;"></div>
+    <div style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; background: #17191D; border: 1px solid #262B31; border-radius: 999px; width: 210px;">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="flex-shrink: 0;"><circle cx="6.2" cy="6.2" r="4.2" stroke="#6B7480" stroke-width="1.5"/><path d="M9.4 9.4L12 12" stroke="#6B7480" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <input type="text" placeholder="Filtrer" onInput="{{ onSearch }}" style="flex-grow: 1; min-width: 0; background: transparent; border: none; color: #ECEFF2; font-size: 12px;">
+    </div>
+    <div style="{{newBtn}}">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2.5v9M2.5 7h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      Nouvelle instance
+    </div>
+  </div>
+
+  <div style="flex-grow: 1; padding: 0 24px; overflow: visible;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <sc-for list="{{instances}}" as="i" hint-placeholder-count="4">
+        <div class="vx-inst" onClick="{{ i.pick }}" style="{{i.row}}">
+
+          <span style="{{i.avatar}}">{{i.initial}}</span>
+
+          <div style="display: flex; flex-direction: column; gap: 3px; width: 190px; min-width: 0;">
+            <span style="font-size: 14px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{i.name}}</span>
+            <span style="font-size: 11.5px; color: #6B7480; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{i.account}}</span>
+          </div>
+
+          <div style="position: relative;">
+            <div onClick="{{ i.openMenu }}" style="{{i.chip}}">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px;">{{i.version}}</span>
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2.5 4l2.5 2.5L7.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div style="{{i.menu}}">
+              <div style="padding: 8px 12px 6px 12px; font-size: 9.5px; font-weight: 600; letter-spacing: 0.1em; color: #6B7480;">VERSIONS INSTALLÉES</div>
+              <sc-for list="{{i.versions}}" as="v" hint-placeholder-count="4">
+                <div class="vx-menu-item" onClick="{{ v.pick }}" style="{{v.style}}">
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px;">{{v.label}}</span>
+                  <div style="flex-grow: 1;"></div>
+                  <span style="{{v.check}}">
+                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.6l2.4 2.4L9 3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </span>
+                </div>
+              </sc-for>
+              <div style="height: 1px; margin: 5px 0; background: #262B31;"></div>
+              <div class="vx-menu-item" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; color: #7C858F; font-size: 11.5px; cursor: pointer;">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 2v8M2 6h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                Télécharger une version
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 7px; width: 140px;">
+            <span style="{{i.dot}}"></span>
+            <span style="font-size: 11.5px; color: {{i.stateColor}};">{{i.state}}</span>
+          </div>
+
+          <div style="flex-grow: 1;"></div>
+
+          <sc-if value="{{i.running}}" hint-placeholder-val="{{false}}">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <div class="vx-ghost" style="display: flex; align-items: center; height: 32px; padding: 0 14px; border: 1px solid #2A2F35; border-radius: 9px; font-size: 12px; color: #9AA3AC; cursor: pointer;">Focus</div>
+              <div class="vx-ghost" onClick="{{ i.stop }}" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid #2A2F35; border-radius: 9px; color: #9AA3AC; cursor: pointer;">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><rect x="1.6" y="1.6" width="7.8" height="7.8" rx="1.6" fill="currentColor"/></svg>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{i.idle}}" hint-placeholder-val="{{true}}">
+            <div class="vx-play" onClick="{{ i.play }}" style="{{i.playBtn}}">
+              <svg width="11" height="12" viewBox="0 0 11 12" fill="none"><path d="M1.5 1.6v8.8a.6.6 0 00.92.5l7-4.4a.6.6 0 000-1l-7-4.4a.6.6 0 00-.92.5z" fill="currentColor"/></svg>
+              Jouer
+            </div>
+          </sc-if>
+
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 14px; height: 46px; padding: 0 24px; border-top: 1px solid #1E2227; flex-shrink: 0; font-size: 11.5px; color: #6B7480;">
+    <span style="display: flex; align-items: center; gap: 7px;">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1.5" y="2.5" width="10" height="8" rx="1.6" stroke="#6B7480" stroke-width="1.2"/><path d="M4 5.5h5M4 7.5h3" stroke="#6B7480" stroke-width="1.2" stroke-linecap="round"/></svg>
+      4 instances · 3,1 Go sur disque
+    </span>
+    <span style="color: #2E343B;">·</span>
+    <span>liens durs, la copie complète serait 6,4 Go</span>
+    <div style="flex-grow: 1;"></div>
+    <span style="display: flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px; background: rgba(61,220,132,0.10); border: 1px solid rgba(61,220,132,0.20); border-radius: 999px; color: {{accent}};">
+      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.8 5.6l2.4 2.4L9 3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Mode développeur actif
+    </span>
+  </div>
+
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#3DDC84","options":["#3DDC84","#F0BA54","#7C8CFF","#FF8A4C"],"section":"Th&#232;me"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      sel: 'alt',
+      menu: 'alt',
+      versions: {},
+      running: { main: true },
+      query: ''
+    };
+  }
+
+  catalogue() {
+    return ['1.26.44.3', '1.26.41.2', '1.21.93.1', '1.20.81.1'];
+  }
+
+  base() {
+    return [
+      { id: 'main', name: 'Principal', account: 'Wyze3306', initial: 'W', tint: '#3DDC84', version: '1.26.44.3', since: '41 min' },
+      { id: 'alt',  name: 'Alt PvP',   account: 'WyzeSecond', initial: 'A', tint: '#7C8CFF', version: '1.21.93.1', since: '12 min' },
+      { id: 'test', name: 'Bac à sable', account: 'Non connecté', initial: 'B', tint: '#F0BA54', version: '1.20.81.1', since: '' },
+      { id: 'prev', name: 'Preview',   account: 'Wyze3306', initial: 'P', tint: '#E8709E', version: '1.26.44.3', since: '' }
+    ];
+  }
+
+  renderVals() {
+    const accent = this.props.accent ?? '#3DDC84';
+    const s = this.state;
+    const q = s.query.trim().toLowerCase();
+
+    const instances = this.base()
+      .filter((i) => q === '' || i.name.toLowerCase().indexOf(q) >= 0 || i.account.toLowerCase().indexOf(q) >= 0)
+      .map((i) => {
+        const sel = i.id === s.sel;
+        const running = !!s.running[i.id];
+        const open = s.menu === i.id;
+        const version = s.versions[i.id] || i.version;
+
+        return Object.assign({}, i, {
+          version: version,
+          running: running,
+          idle: !running,
+          pick: () => this.setState({ sel: i.id, menu: null }),
+          openMenu: (e) => { e.stopPropagation(); this.setState({ sel: i.id, menu: open ? null : i.id }); },
+          play: (e) => { e.stopPropagation(); const n = Object.assign({}, s.running); n[i.id] = true; this.setState({ running: n, sel: i.id }); },
+          stop: (e) => { e.stopPropagation(); const n = Object.assign({}, s.running); n[i.id] = false; this.setState({ running: n }); },
+
+          row: 'position: relative; display: flex; align-items: center; gap: 14px; height: 76px; padding: 0 14px 0 16px; cursor: pointer; transition: background .12s, border-color .12s; ' +
+            'background: ' + (sel ? '#1B1E22' : '#16181B') + '; border: 1px solid ' + (sel ? '#333A42' : '#212429') + '; border-radius: 14px; ' +
+            'z-index: ' + (open ? '20' : '1') + ';',
+
+          avatar: 'display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px; ' +
+            'font-size: 15px; font-weight: 600; color: ' + i.tint + '; background: ' + i.tint + '1A; border: 1px solid ' + i.tint + '33;',
+
+          chip: 'display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border-radius: 9px; cursor: pointer; transition: all .12s; ' +
+            'background: ' + (open ? '#24282D' : '#1D2024') + '; border: 1px solid ' + (open ? '#3A4048' : '#2A2F35') + '; color: #C9D0D7;',
+
+          menu: 'position: absolute; left: 0; top: 36px; width: 208px; padding: 4px 0 6px 0; background: #17191D; border: 1px solid #2E343B; border-radius: 12px; ' +
+            'box-shadow: 0 16px 40px rgba(0,0,0,0.6); display: ' + (open ? 'block' : 'none') + '; z-index: 30;',
+
+          versions: this.catalogue().map((v) => ({
+            label: v,
+            pick: (e) => { e.stopPropagation(); const n = Object.assign({}, s.versions); n[i.id] = v; this.setState({ versions: n, menu: null }); },
+            style: 'display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; cursor: pointer; color: ' + (v === version ? '#ECEFF2' : '#9AA3AC') + ';',
+            check: 'display: ' + (v === version ? 'flex' : 'none') + '; color: ' + accent + ';'
+          })),
+
+          dot: 'width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; background: ' + (running ? accent : '#3A4048') + ';',
+          state: running ? 'En cours · ' + i.since : (i.account === 'Non connecté' ? 'Connexion requise' : 'Prête'),
+          stateColor: running ? accent : '#6B7480',
+
+          playBtn: 'display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 16px; border-radius: 9px; font-size: 12.5px; font-weight: 600; cursor: pointer; ' +
+            'background: ' + accent + '; color: #0E1512;'
+        });
+      });
+
+    const live = instances.filter((i) => i.running).length;
+
+    return {
+      accent: accent,
+      instances: instances,
+      summary: instances.length + ' instances · ' + live + ' en cours · 3 comptes',
+      onSearch: (e) => this.setState({ query: e.target.value }),
+      newBtn: 'display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 16px; border-radius: 10px; font-size: 12.5px; font-weight: 600; cursor: pointer; ' +
+        'background: ' + accent + '; color: #0E1512;'
+    };
+  }
+}
+</script>
+</body>
+</html>

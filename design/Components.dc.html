@@ -1,0 +1,222 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #3DDC84; text-decoration: none; }
+    a:hover { color: #7CFFB2; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1100px; height: 800px; padding: 32px 36px; background: #0E0F11; font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif; color: #ECEFF2; overflow: hidden;">
+
+  <div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px;">
+    <span style="font-size: 20px; font-weight: 600; letter-spacing: -0.02em;">Système visuel</span>
+    <span style="font-size: 12px; color: #6B7480;">Surfaces neutres, un seul accent, arrondis généreux</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; margin-top: 26px;">
+
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: #6B7480;">SURFACES</span>
+      <div style="display: flex; gap: 8px;">
+        <sc-for list="{{surfaces}}" as="c" hint-placeholder-count="6">
+          <div style="display: flex; flex-direction: column; gap: 7px; flex-grow: 1;">
+            <span style="{{c.swatch}}"></span>
+            <span style="font-size: 10.5px; color: #9AA3AC;">{{c.role}}</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: #5C646E;">{{c.hex}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: #6B7480;">ACCENT ET ÉTATS</span>
+      <div style="display: flex; gap: 8px;">
+        <sc-for list="{{accents}}" as="c" hint-placeholder-count="5">
+          <div style="display: flex; flex-direction: column; gap: 7px; flex-grow: 1;">
+            <span style="{{c.swatch}}"></span>
+            <span style="font-size: 10.5px; color: #9AA3AC;">{{c.role}}</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: #5C646E;">{{c.hex}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; margin-top: 34px;">
+
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+      <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: #6B7480;">TYPOGRAPHIE</span>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: baseline; gap: 14px;">
+          <span style="font-size: 22px; font-weight: 600; letter-spacing: -0.02em;">Space Grotesk</span>
+          <span style="font-size: 10.5px; color: #5C646E;">Titre · 22 / 600</span>
+        </div>
+        <div style="display: flex; align-items: baseline; gap: 14px;">
+          <span style="font-size: 13.5px; font-weight: 500;">Nom de module, libellé de réglage</span>
+          <span style="font-size: 10.5px; color: #5C646E;">Corps · 13,5 / 500</span>
+        </div>
+        <div style="display: flex; align-items: baseline; gap: 14px;">
+          <span style="font-size: 11px; color: #6B7480;">Description secondaire sous un libellé</span>
+          <span style="font-size: 10.5px; color: #5C646E;">Aide · 11 / 400</span>
+        </div>
+        <div style="display: flex; align-items: baseline; gap: 14px;">
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 13px;">312 FPS · 1.26.44.3</span>
+          <span style="font-size: 10.5px; color: #5C646E;">Chiffres · JetBrains Mono</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+      <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: #6B7480;">CONTRÔLES</span>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="{{primary}}">Action principale</div>
+        <div style="display: flex; align-items: center; height: 32px; padding: 0 14px; border: 1px solid #2A2F35; border-radius: 9px; font-size: 12px; color: #9AA3AC;">Secondaire</div>
+        <div style="display: flex; align-items: center; height: 32px; padding: 0 14px; border: 1px solid rgba(232,96,78,0.3); border-radius: 9px; font-size: 12px; color: #E8604E;">Supprimer</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 18px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="{{trackOn}}"><span style="{{knobOn}}"></span></div>
+          <span style="font-size: 11.5px; color: #9AA3AC;">Actif</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="{{trackOff}}"><span style="{{knobOff}}"></span></div>
+          <span style="font-size: 11.5px; color: #9AA3AC;">Inactif</span>
+        </div>
+        <div style="display: flex; gap: 2px; padding: 2px; background: #17191D; border: 1px solid #262B31; border-radius: 9px;">
+          <span style="display: flex; align-items: center; height: 24px; padding: 0 11px; border-radius: 7px; font-size: 11.5px; background: #252A30;">Gauche</span>
+          <span style="display: flex; align-items: center; height: 24px; padding: 0 11px; border-radius: 7px; font-size: 11.5px; color: #7C858F;">Centre</span>
+          <span style="display: flex; align-items: center; height: 24px; padding: 0 11px; border-radius: 7px; font-size: 11.5px; color: #7C858F;">Droite</span>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="position: relative; width: 190px; height: 4px; background: #262B31; border-radius: 999px;">
+          <span style="{{sliderFill}}"></span>
+          <span style="{{sliderKnob}}"></span>
+        </div>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px;">1,45x</span>
+        <div style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 6px; background: #1D2024; border: 1px solid #2A2F35; border-radius: 8px;">
+          <span style="{{swatchAccent}}"></span>
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #9AA3AC;">{{accent}}</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 14px; margin-top: 34px;">
+    <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: #6B7480;">CARTE DE MODULE</span>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+      <sc-for list="{{cards}}" as="c" hint-placeholder-count="3">
+        <div style="{{c.card}}">
+          <span style="{{c.bar}}"></span>
+          <div style="display: flex; flex-direction: column; gap: 3px; flex-grow: 1; min-width: 0;">
+            <span style="{{c.nameStyle}}">{{c.name}}</span>
+            <span style="font-size: 11px; color: #6B7480;">{{c.hint}}</span>
+          </div>
+          <span style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: {{c.iconBg}};">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><circle cx="7.5" cy="7.5" r="2.2" stroke="#9AA3AC" stroke-width="1.4"/><path d="M7.5 1.6v1.8M7.5 11.6v1.8M13.4 7.5h-1.8M3.4 7.5H1.6M11.7 3.3l-1.3 1.3M4.6 10.4l-1.3 1.3M11.7 11.7l-1.3-1.3M4.6 4.6L3.3 3.3" stroke="#9AA3AC" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </span>
+          <div style="{{c.track}}"><span style="{{c.knob}}"></span></div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display: flex; gap: 22px; font-size: 11px; color: #5C646E;">
+      <span>Inactif · fond neutre, aucun accent</span>
+      <span>Actif · barre 2 px et interrupteur</span>
+      <span>Survol · surface éclaircie</span>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 26px; margin-top: 32px; padding-top: 22px; border-top: 1px solid #1E2227;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: #6B7480;">RAYONS</span>
+      <span style="display: flex; align-items: center; justify-content: center; width: 34px; height: 30px; border: 1px solid #2A2F35; border-radius: 7px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #9AA3AC;">7</span>
+      <span style="display: flex; align-items: center; justify-content: center; width: 34px; height: 30px; border: 1px solid #2A2F35; border-radius: 9px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #9AA3AC;">9</span>
+      <span style="display: flex; align-items: center; justify-content: center; width: 34px; height: 30px; border: 1px solid #2A2F35; border-radius: 12px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #9AA3AC;">12</span>
+      <span style="display: flex; align-items: center; justify-content: center; width: 34px; height: 30px; border: 1px solid #2A2F35; border-radius: 14px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #9AA3AC;">14</span>
+    </div>
+    <span style="width: 1px; height: 24px; background: #1E2227;"></span>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: #6B7480;">GOUTTIÈRES</span>
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #9AA3AC;">4 · 8 · 12 · 16 · 24</span>
+    </div>
+    <span style="width: 1px; height: 24px; background: #1E2227;"></span>
+    <span style="font-size: 11.5px; color: #6B7480;">Une seule couleur porte l'état. Tout le reste est gris.</span>
+  </div>
+
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#3DDC84","options":["#3DDC84","#F0BA54","#7C8CFF","#FF8A4C"],"section":"Th&#232;me"}}'>
+class Component extends DCLogic {
+  swatch(hex, ring) {
+    return 'display: block; height: 46px; border-radius: 10px; background: ' + hex + '; border: 1px solid ' + (ring || 'rgba(255,255,255,0.06)') + ';';
+  }
+
+  renderVals() {
+    const accent = this.props.accent ?? '#3DDC84';
+
+    const surfaces = [
+      { role: 'Fond', hex: '#0E0F11' },
+      { role: 'Panneau', hex: '#16181B' },
+      { role: 'Carte', hex: '#191C20' },
+      { role: 'Survol', hex: '#24282D' },
+      { role: 'Trait', hex: '#2A2F35' },
+      { role: 'Texte', hex: '#ECEFF2' }
+    ].map((c) => Object.assign({}, c, { swatch: this.swatch(c.hex) }));
+
+    const accents = [
+      { role: 'Accent', hex: accent },
+      { role: 'Voile', hex: 'rgba(61,220,132,0.12)' },
+      { role: 'Discret', hex: '#9AA3AC' },
+      { role: 'Alerte', hex: '#F0BA54' },
+      { role: 'Danger', hex: '#E8604E' }
+    ].map((c) => Object.assign({}, c, { swatch: this.swatch(c.hex) }));
+
+    const track = (on) => 'position: relative; width: 34px; height: 20px; border-radius: 999px; flex-shrink: 0; background: ' + (on ? accent : '#2A2F35') + ';';
+    const knob = (on) => 'position: absolute; top: 3px; left: ' + (on ? '16px' : '3px') + '; width: 14px; height: 14px; border-radius: 999px; background: ' + (on ? '#0E1512' : '#8B939C') + ';';
+
+    const cards = [
+      { name: 'Ping', hint: 'Latence vers le serveur', on: false, hover: false },
+      { name: 'CPS', hint: 'Clics par seconde', on: true, hover: false },
+      { name: 'Coordonnées', hint: 'Position et direction', on: true, hover: true }
+    ].map((c) => Object.assign({}, c, {
+      card: 'position: relative; display: flex; align-items: center; gap: 12px; height: 66px; padding: 0 12px 0 16px; border-radius: 12px; overflow: hidden; ' +
+        'background: ' + (c.hover ? '#24282D' : '#191C20') + '; border: 1px solid ' + (c.hover ? '#363C43' : '#262B31') + ';',
+      bar: 'position: absolute; left: 0; top: 14px; bottom: 14px; width: 2px; border-radius: 0 2px 2px 0; background: ' + (c.on ? accent : 'transparent') + ';',
+      nameStyle: 'font-size: 13.5px; font-weight: 500; color: ' + (c.on ? '#ECEFF2' : '#8A929B') + ';',
+      iconBg: c.hover ? '#2A2F35' : 'transparent',
+      track: track(c.on),
+      knob: knob(c.on)
+    }));
+
+    return {
+      accent: accent,
+      surfaces: surfaces,
+      accents: accents,
+      cards: cards,
+      primary: 'display: flex; align-items: center; height: 32px; padding: 0 16px; border-radius: 9px; font-size: 12px; font-weight: 600; background: ' + accent + '; color: #0E1512;',
+      trackOn: track(true),
+      knobOn: knob(true),
+      trackOff: track(false),
+      knobOff: knob(false),
+      sliderFill: 'position: absolute; left: 0; top: 0; bottom: 0; width: 42%; border-radius: 999px; background: ' + accent + ';',
+      sliderKnob: 'position: absolute; top: 50%; left: 42%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 999px; background: #ECEFF2;',
+      swatchAccent: 'width: 16px; height: 16px; border-radius: 5px; background: ' + accent + '; border: 1px solid rgba(255,255,255,0.14);'
+    };
+  }
+}
+</script>
+</body>
+</html>

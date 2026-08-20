@@ -175,9 +175,14 @@ hover state from one frame to the next.
 
 ## Themes
 
-`Theme` is a serialisable struct holding every visual decision: thirteen
+`Theme` is a serialisable struct holding every visual decision: fourteen
 colours, four shape values, typography, effects and animation speed. No drawing
 code invents a colour or a radius; it all goes through `theme()`.
+
+The surfaces are neutral graphite, not tinted. Mint is the accent and nothing
+else uses it: an element is green because it is active, selected or primary. That
+is the whole colour rule, and it is why the client reads as calm rather than as a
+wall of one hue.
 
 That is what makes the theme editor a real feature rather than an accent colour
 picker. A theme can drop the blur, round differently, enlarge the text and

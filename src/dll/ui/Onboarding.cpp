@@ -31,7 +31,7 @@ struct Preset {
 
 constexpr std::array<Preset, 3> kPresets{{
     {"pvp", "PvP", "HUD compact, viseur, latence et framerate en évidence.", "PvP",
-     "Emerald Night"},
+     "Nuit"},
     {"survie", "Survie", "Coordonnées, boussole, armure et statistiques de session.", "Survie",
      "Velyx"},
     {"stream", "Streaming", "Informations personnelles masquées, captures rangées.", "Global",
