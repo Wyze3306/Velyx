@@ -16,21 +16,9 @@ public:
     void onDisable() override;
 
 private:
-    enum class Page {
-        Favourites,
-        Movement,
-        Hud,
-        Render,
-        Utility,
-        Misc,
-        Scripts,
-        Themes,
-        Profiles,
-        Keybinds,
-        Diagnostics,
-        History,
-        Captures,
-    };
+    enum class Page { Modules, Themes, Profiles, Keybinds, Diagnostics, History, Captures };
+
+    enum class Filter { All, Favourites, Movement, Hud, Render, Utility, Misc, Scripts, Client };
 
     void onRender(RenderTopEvent& event);
     void onMouse(MouseEvent& event);
@@ -39,7 +27,8 @@ private:
 
     void drawHeader(const Rect& rect);
     void drawSidebar(const Rect& rect);
-    void drawModuleList(const Rect& rect);
+    void drawCategoryBar(const Rect& rect);
+    void drawModuleGrid(const Rect& rect);
     void drawSettings(const Rect& rect);
     void drawFooter(const Rect& rect);
 
@@ -56,7 +45,9 @@ private:
     [[nodiscard]] std::vector<Module*> visibleModules() const;
 
     Rect window_;
-    Page page_ = Page::Favourites;
+    Page page_ = Page::Modules;
+    Filter filter_ = Filter::All;
+    bool showSettings_ = false;
     Module* selected_ = nullptr;
 
     std::string search_;

@@ -29,45 +29,45 @@
 namespace velyx {
 namespace {
 
-constexpr float kWindowWidth = 940.f;
-constexpr float kWindowHeight = 580.f;
-constexpr float kHeaderHeight = 56.f;
-constexpr float kFooterHeight = 30.f;
-constexpr float kSidebarWidth = 190.f;
-constexpr float kListWidth = 300.f;
-constexpr float kRowHeight = 46.f;
+constexpr float kWindowWidth = 1160.f;
+constexpr float kWindowHeight = 680.f;
+constexpr float kHeaderHeight = 52.f;
+constexpr float kFilterHeight = 54.f;
+constexpr float kFooterHeight = 34.f;
+constexpr float kSidebarWidth = 220.f;
+constexpr float kCardHeight = 64.f;
+constexpr float kCardGap = 12.f;
+constexpr int kColumns = 3;
 
-struct SidebarItem {
+struct FilterItem {
     const char* label;
-    const char* glyph;
+    int filter;
+};
+
+const FilterItem kFilters[] = {
+    {"Tous", 0}, {"Favoris", 1}, {"Déplacement", 2}, {"HUD", 3},
+    {"Rendu", 4}, {"Utilitaires", 5}, {"Divers", 6}, {"Scripts", 7}, {"Client", 8},
+};
+
+struct PageItem {
+    const char* label;
     int page;
-    bool separatorBefore;
 };
 
-const SidebarItem kSidebar[] = {
-    {"Favoris", "★", 0, false},
-    {"Déplacement", "→", 1, true},
-    {"HUD", "▤", 2, false},
-    {"Rendu", "◈", 3, false},
-    {"Utilitaires", "⚙", 4, false},
-    {"Divers", "◆", 5, false},
-    {"Scripts", "{}", 6, false},
-    {"Thèmes", "◐", 7, true},
-    {"Profils", "▣", 8, false},
-    {"Historique", "◷", 11, false},
-    {"Captures", "▦", 12, false},
-    {"Raccourcis", "⌨", 9, false},
-    {"Diagnostic", "!", 10, false},
+const PageItem kPages[] = {
+    {"Thèmes", 1}, {"Profils", 2}, {"Historique", 5},
+    {"Captures", 6}, {"Raccourcis", 3}, {"Diagnostic", 4},
 };
 
-ModuleCategory categoryForPage(int page) {
-    switch (page) {
-        case 1: return ModuleCategory::Movement;
-        case 2: return ModuleCategory::Hud;
-        case 3: return ModuleCategory::Render;
-        case 4: return ModuleCategory::Utility;
-        case 5: return ModuleCategory::Misc;
-        case 6: return ModuleCategory::Script;
+ModuleCategory categoryForFilter(int filter) {
+    switch (filter) {
+        case 2: return ModuleCategory::Movement;
+        case 3: return ModuleCategory::Hud;
+        case 4: return ModuleCategory::Render;
+        case 5: return ModuleCategory::Utility;
+        case 6: return ModuleCategory::Misc;
+        case 7: return ModuleCategory::Script;
+        case 8: return ModuleCategory::Client;
         default: return ModuleCategory::Client;
     }
 }
@@ -138,23 +138,29 @@ void ClickGui::onChar(CharEvent& event) {
 std::vector<Module*> ClickGui::visibleModules() const {
     if (!search_.empty()) {
         std::vector<Module*> result;
-        for (const auto& hit : modules().search(search_, 40)) {
+        for (const auto& hit : modules().search(search_, 60)) {
             if (hit.setting) continue;
             if (std::ranges::find(result, hit.module) == result.end()) result.push_back(hit.module);
         }
         return result;
     }
 
-    if (page_ == Page::Favourites) {
-        auto result = modules().favourites();
-        if (result.empty()) {
+    if (filter_ == Filter::Favourites) return modules().favourites();
 
-            result = modules().enabled();
+    if (filter_ == Filter::All) {
+        std::vector<Module*> result;
+        for (const auto& module : modules().all()) {
+            if (module->category() == ModuleCategory::Client) continue;
+            result.push_back(module.get());
         }
+        std::ranges::sort(result, [](const Module* a, const Module* b) {
+            if (a->enabled() != b->enabled()) return a->enabled();
+            return a->name() < b->name();
+        });
         return result;
     }
 
-    return modules().byCategory(categoryForPage(static_cast<int>(page_)));
+    return modules().byCategory(categoryForFilter(static_cast<int>(filter_)));
 }
 
 void ClickGui::onRender(RenderTopEvent& event) {
@@ -222,12 +228,16 @@ void ClickGui::onRender(RenderTopEvent& event) {
         case Page::Captures:
             drawCapturesPage(content);
             break;
-        default: {
-            const Rect list{content.left, content.top, content.left + kListWidth, content.bottom};
-            drawModuleList(list);
-            drawSettings(Rect{list.right, content.top, content.right, content.bottom});
+        case Page::Modules:
+            if (showSettings_ && selected_) {
+                drawSettings(content);
+            } else {
+                const Rect filters{content.left, content.top, content.right,
+                                   content.top + kFilterHeight};
+                drawCategoryBar(filters);
+                drawModuleGrid(Rect{content.left, filters.bottom, content.right, content.bottom});
+            }
             break;
-        }
     }
 
     drawFooter(footer);
@@ -243,44 +253,26 @@ void ClickGui::drawHeader(const Rect& rect) {
     Renderer& renderer = gui.renderer();
     const auto& active = theme();
 
-    renderer.fillRoundedCorners(rect, active.surface.fade(0.5f), active.panelRadius,
-                                active.panelRadius, 0.f, 0.f);
-    renderer.line({rect.left, rect.bottom}, {rect.right, rect.bottom}, active.border.fade(0.7f),
-                  1.f);
+    renderer.line({rect.left + 16.f, rect.bottom}, {rect.right - 16.f, rect.bottom},
+                  active.border.fade(0.6f), 1.f);
 
-    const Rect mark{rect.left + 20.f, rect.top, rect.left + 130.f, rect.bottom};
+    const Vec2 mark{rect.left + 30.f, rect.center().y};
+    renderer.polyline({{mark.x - 8.f, mark.y - 8.f}, {mark.x, mark.y + 8.f},
+                       {mark.x + 8.f, mark.y - 8.f}},
+                      active.liveAccent(), 2.4f);
 
-    const Vec2 markCentre{mark.left + 11.f, mark.center().y};
-    renderer.polyline({{markCentre.x - 9.f, markCentre.y - 9.f},
-                       {markCentre.x, markCentre.y + 9.f},
-                       {markCentre.x + 9.f, markCentre.y - 9.f}},
-                      active.liveAccent(), 2.6f);
+    gui.text("VELYX", Rect{rect.left + 48.f, rect.top, rect.left + 160.f, rect.bottom}, active.text,
+             15.f, FontWeight::Bold);
 
-    gui.text("VELYX", Rect{mark.left + 30.f, mark.top, mark.right, mark.bottom}, active.text, 18.f,
-             FontWeight::Bold);
+    gui.text(version::kString,
+             Rect{rect.left + 116.f, rect.top, rect.left + 180.f, rect.bottom}, active.textDim,
+             10.5f, FontWeight::Regular);
 
-    const Rect search{rect.left + 160.f, rect.center().y - 15.f, rect.left + 480.f,
-                      rect.center().y + 15.f};
-    gui.textField(UiId("search"), search, search_, "Rechercher un module ou un réglage…", 48);
-
-    const Rect profileRect{rect.right - 250.f, rect.center().y - 15.f, rect.right - 60.f,
-                           rect.center().y + 15.f};
-
-    std::string currentProfile = profiles().current().name;
-    if (currentProfile.empty()) currentProfile = "Global";
-
-    auto names = profiles().names();
-    if (gui.dropdown(UiId("profile_switch"), profileRect, currentProfile, names)) {
-        profiles().switchTo(currentProfile);
-        config().activeProfile = currentProfile;
-        config().save();
-    }
-
-    const Rect close{rect.right - 46.f, rect.center().y - 15.f, rect.right - 16.f,
-                     rect.center().y + 15.f};
+    const Rect close{rect.right - 46.f, rect.center().y - 14.f, rect.right - 18.f,
+                     rect.center().y + 14.f};
     if (gui.iconButton(UiId("close"), close, "✕", active.textMuted)) setEnabled(false);
 
-    const Rect dragArea{rect.left, rect.top, search.left - 8.f, rect.bottom};
+    const Rect dragArea{rect.left, rect.top, close.left - 8.f, rect.bottom};
     if (gui.clicked() && dragArea.contains(gui.mouse())) {
         dragging_ = true;
         dragOffset_ = gui.mouse() - window_.center();
@@ -303,140 +295,196 @@ void ClickGui::drawSidebar(const Rect& rect) {
     Renderer& renderer = gui.renderer();
     const auto& active = theme();
 
-    renderer.fillRect(rect, active.backgroundDeep.fade(0.35f));
-    renderer.line({rect.right, rect.top}, {rect.right, rect.bottom}, active.border.fade(0.7f), 1.f);
+    renderer.fillRect(rect, active.backgroundDeep.fade(0.5f));
+    renderer.line({rect.right, rect.top}, {rect.right, rect.bottom}, active.border.fade(0.6f), 1.f);
 
-    float y = rect.top + 12.f;
+    gui.text("PROFILS", Rect{rect.left + 20.f, rect.top + 10.f, rect.right, rect.top + 28.f},
+             active.textDim, 10.f, FontWeight::Bold);
 
-    for (const SidebarItem& item : kSidebar) {
-        if (item.separatorBefore) {
-            renderer.line({rect.left + 16.f, y + 4.f}, {rect.right - 16.f, y + 4.f},
-                          active.border.fade(0.5f), 1.f);
-            y += 12.f;
-        }
+    float y = rect.top + 32.f;
+    const auto& all = profiles().all();
 
-        const Rect row{rect.left + 8.f, y, rect.right - 8.f, y + 34.f};
-        y += 36.f;
+    for (size_t i = 0; i < all.size(); ++i) {
+        const Profile& profile = all[i];
+        const Rect row{rect.left + 10.f, y, rect.right - 10.f, y + 44.f};
+        y += 46.f;
+        if (row.bottom > rect.bottom - 200.f) break;
 
-        const bool selected = static_cast<int>(page_) == item.page;
-        const UiId id("sidebar", item.page);
+        const bool current = profile.name == profiles().current().name;
+        const UiId id("profile_row", static_cast<int>(i));
         const float hover = gui.animate(id, gui.hovered(id));
-        const float selection = gui.animate(UiId("sidebar_sel", item.page), selected, 20.f);
+        const float on = gui.animate(UiId("profile_on", static_cast<int>(i)), current, 20.f);
 
-        if (hover > 0.01f || selection > 0.01f) {
-            renderer.fillRounded(row,
-                                 lerp(active.surfaceHover.fade(hover * 0.6f),
-                                      active.liveAccent().fade(0.16f), selection),
+        if (hover > 0.01f || on > 0.01f) {
+            renderer.fillRounded(row, lerp(active.surfaceHover.fade(hover * 0.6f),
+                                           active.surface, on),
                                  active.radius);
         }
 
-        if (selection > 0.01f) {
-            const float barHeight = row.height() * 0.55f * selection;
-            renderer.fillRounded(Rect{row.left - 5.f, row.center().y - barHeight * 0.5f,
-                                      row.left - 2.f, row.center().y + barHeight * 0.5f},
-                                 active.liveAccent(), 1.5f);
+        renderer.fillCircle({row.left + 14.f, row.center().y}, 3.f,
+                            lerp(active.border, active.liveAccent(), on));
+
+        gui.text(profile.name, Rect{row.left + 26.f, row.top + 6.f, row.right - 10.f,
+                                    row.top + 24.f},
+                 lerp(active.textMuted, active.text, std::max(hover, on)), 13.f,
+                 current ? FontWeight::SemiBold : FontWeight::Medium);
+
+        const std::string hint =
+            profile.serverMatches.empty()
+                ? (profile.isDefault ? "Par défaut" : "Manuel")
+                : "Auto · " + strings::join(profile.serverMatches, ", ");
+        gui.text(hint, Rect{row.left + 26.f, row.top + 22.f, row.right - 10.f, row.bottom - 4.f},
+                 active.textDim, 10.5f, FontWeight::Regular);
+
+        if (gui.hovered(id) && gui.clicked() && !current) {
+            profiles().switchTo(profile.name);
+            config().activeProfile = profile.name;
+            config().save();
+        }
+    }
+
+    float navY = rect.bottom - 56.f - static_cast<float>(std::size(kPages)) * 30.f;
+
+    renderer.line({rect.left + 20.f, navY - 12.f}, {rect.right - 20.f, navY - 12.f},
+                  active.border.fade(0.5f), 1.f);
+
+    for (const PageItem& item : kPages) {
+        const Rect row{rect.left + 10.f, navY, rect.right - 10.f, navY + 28.f};
+        navY += 30.f;
+
+        const bool current = static_cast<int>(page_) == item.page;
+        const UiId id("page_row", item.page);
+        const float hover = gui.animate(id, gui.hovered(id));
+        const float on = gui.animate(UiId("page_on", item.page), current, 20.f);
+
+        if (hover > 0.01f || on > 0.01f) {
+            renderer.fillRounded(row, lerp(active.surfaceHover.fade(hover * 0.6f),
+                                           active.liveAccent().fade(0.12f), on),
+                                 active.radius);
         }
 
-        const Color foreground = lerp(active.textMuted, active.text, std::max(hover, selection));
-
-        gui.text(item.glyph, Rect{row.left + 10.f, row.top, row.left + 34.f, row.bottom},
-                 lerp(foreground, active.liveAccent(), selection), 14.f, FontWeight::Medium,
-                 TextAlign::Center);
-        gui.text(item.label, Rect{row.left + 40.f, row.top, row.right - 30.f, row.bottom},
-                 foreground, 13.5f, selected ? FontWeight::SemiBold : FontWeight::Medium);
-
-        if (item.page >= 1 && item.page <= 6) {
-            const auto list = modules().byCategory(categoryForPage(item.page));
-            const auto activeCount = std::ranges::count_if(
-                list, [](const Module* module) { return module->enabled(); });
-
-            if (activeCount > 0) {
-                gui.text(std::to_string(activeCount),
-                         Rect{row.right - 30.f, row.top, row.right - 8.f, row.bottom},
-                         active.liveAccent(), 11.f, FontWeight::Bold, TextAlign::Right);
-            }
-        }
+        gui.text(item.label, Rect{row.left + 16.f, row.top, row.right - 10.f, row.bottom},
+                 lerp(lerp(active.textDim, active.textMuted, hover), active.liveAccent(), on),
+                 12.5f, current ? FontWeight::SemiBold : FontWeight::Medium);
 
         if (gui.hovered(id) && gui.clicked()) {
             page_ = static_cast<Page>(item.page);
-            selected_ = nullptr;
+            showSettings_ = false;
             search_.clear();
         }
     }
+
+    if (gui.button(UiId("new_profile"),
+                   Rect{rect.left + 12.f, rect.bottom - 46.f, rect.right - 12.f, rect.bottom - 14.f},
+                   "Nouveau profil")) {
+        profiles().create("Nouveau profil");
+    }
 }
 
-void ClickGui::drawModuleList(const Rect& rect) {
+void ClickGui::drawCategoryBar(const Rect& rect) {
+    Ui& gui = ui();
+    const auto& active = theme();
+
+    float x = rect.left + 20.f;
+    for (const FilterItem& item : kFilters) {
+        const float width = gui.renderer().measure(item.label, [&] {
+            FontSpec spec;
+            spec.family = active.fontFamily;
+            spec.size = 12.f * active.fontScale;
+            spec.weight = FontWeight::SemiBold;
+            return spec;
+        }()).x + 26.f;
+
+        const Rect chip{x, rect.center().y - 15.f, x + width, rect.center().y + 15.f};
+        x += width + 6.f;
+
+        if (gui.chip(UiId("filter", item.filter), chip, item.label,
+                     static_cast<int>(filter_) == item.filter)) {
+            filter_ = static_cast<Filter>(item.filter);
+            search_.clear();
+        }
+    }
+
+    const Rect search{rect.right - 268.f, rect.center().y - 16.f, rect.right - 20.f,
+                      rect.center().y + 16.f};
+    gui.textField(UiId("search"), search, search_, "Rechercher un module, un réglage", 48);
+}
+
+void ClickGui::drawModuleGrid(const Rect& rect) {
     Ui& gui = ui();
     Renderer& renderer = gui.renderer();
     const auto& active = theme();
 
-    renderer.line({rect.right, rect.top}, {rect.right, rect.bottom}, active.border.fade(0.7f), 1.f);
-
     const auto list = visibleModules();
 
     if (list.empty()) {
-        gui.text(search_.empty() ? "Aucun module dans cette catégorie."
-                                 : "Aucun résultat.",
-                 rect, active.textMuted, 13.f, FontWeight::Regular, TextAlign::Center);
+        gui.text(search_.empty() ? "Rien dans cette catégorie." : "Aucun résultat.", rect,
+                 active.textDim, 13.f, FontWeight::Regular, TextAlign::Center);
         return;
     }
 
-    const Rect view = rect.inflated(-10.f);
-    const float contentHeight = static_cast<float>(list.size()) * (kRowHeight + 6.f);
-    const float offset = gui.beginScroll(UiId("module_list"), view, contentHeight);
+    const Rect view{rect.left + 20.f, rect.top, rect.right - 12.f, rect.bottom - 8.f};
+    const float cardWidth = (view.width() - kCardGap * (kColumns - 1) - 8.f) / kColumns;
+    const int rows = (static_cast<int>(list.size()) + kColumns - 1) / kColumns;
 
-    float y = view.top + offset;
+    const float offset = gui.beginScroll(UiId("module_grid"), view,
+                                         static_cast<float>(rows) * (kCardHeight + kCardGap));
 
     for (size_t i = 0; i < list.size(); ++i) {
         Module* module = list[i];
-        const Rect row{view.left, y, view.right - 6.f, y + kRowHeight};
-        y += kRowHeight + 6.f;
 
-        if (row.bottom < view.top - 20.f || row.top > view.bottom + 20.f) continue;
+        const int column = static_cast<int>(i) % kColumns;
+        const int row = static_cast<int>(i) / kColumns;
 
-        const UiId id("module_row", static_cast<int>(strings::hash32(module->id())));
-        const bool isSelected = selected_ == module;
-        const float hover = gui.animate(id, gui.hovered(id));
-        const float selection = gui.animate(UiId("module_sel", static_cast<int>(i)), isSelected, 20.f);
+        const float x = view.left + static_cast<float>(column) * (cardWidth + kCardGap);
+        const float y = view.top + offset + static_cast<float>(row) * (kCardHeight + kCardGap);
 
-        renderer.fillRounded(row,
-                             lerp(active.surface.fade(0.55f + hover * 0.35f),
-                                  active.liveAccent().fade(0.14f), selection),
-                             active.radius);
+        const Rect card{x, y, x + cardWidth, y + kCardHeight};
+        if (card.bottom < view.top - 40.f || card.top > view.bottom + 40.f) continue;
 
-        if (module->enabled()) {
-            renderer.fillRounded(Rect{row.left, row.top + 8.f, row.left + 3.f, row.bottom - 8.f},
-                                 active.liveAccent(), 1.5f);
+        const UiId id("card", static_cast<int>(strings::hash32(module->id())));
+        const bool inside = card.contains(gui.mouse());
+        const float hover = gui.animate(id, inside);
+        const float on = gui.animate(UiId("card_on", static_cast<int>(i)), module->enabled(), 18.f);
+
+        renderer.fillRounded(card, lerp(active.surface, active.surfaceHover, hover),
+                             active.radius + 3.f);
+        renderer.strokeRounded(card, lerp(active.border.fade(0.8f), active.border, hover),
+                               active.radius + 3.f, active.borderWidth);
+
+        if (on > 0.01f) {
+            renderer.fillRounded(Rect{card.left, card.top + 14.f, card.left + 2.f,
+                                      card.bottom - 14.f},
+                                 active.liveAccent().fade(on), 1.f);
         }
-        if (selection > 0.01f) {
-            renderer.strokeRounded(row, active.liveAccent().fade(selection), active.radius,
-                                   active.borderWidth);
-        }
 
-        gui.text(module->name(), Rect{row.left + 14.f, row.top + 6.f, row.right - 90.f,
-                                      row.top + kRowHeight * 0.55f},
-                 module->enabled() ? active.text : active.text.fade(0.75f), 13.5f,
-                 FontWeight::SemiBold);
+        gui.text(module->name(), Rect{card.left + 16.f, card.top + 10.f, card.right - 74.f,
+                                      card.top + 30.f},
+                 lerp(active.textMuted, active.text, on), 13.5f, FontWeight::SemiBold);
 
-        gui.text(module->description(),
-                 Rect{row.left + 14.f, row.top + kRowHeight * 0.5f, row.right - 90.f,
-                      row.bottom - 4.f},
-                 active.textMuted, 11.f, FontWeight::Regular);
+        gui.text(module->description(), Rect{card.left + 16.f, card.top + 28.f, card.right - 74.f,
+                                             card.bottom - 8.f},
+                 active.textDim, 11.f, FontWeight::Regular);
 
-        const Rect star{row.right - 78.f, row.center().y - 12.f, row.right - 54.f,
-                        row.center().y + 12.f};
-        if (gui.iconButton(UiId("fav", static_cast<int>(i)), star, module->favourite() ? "★" : "☆",
-                           module->favourite() ? active.liveAccent() : active.textMuted)) {
-            module->setFavourite(!module->favourite());
+        const Rect gear{card.right - 70.f, card.center().y - 14.f, card.right - 42.f,
+                        card.center().y + 14.f};
+        if (gui.iconButton(UiId("gear", static_cast<int>(i)), gear, "⚙",
+                           active.textDim.fade(0.4f + hover * 0.6f))) {
+            selected_ = module;
+            showSettings_ = true;
         }
 
         bool enabled = module->enabled();
-        if (gui.toggle(UiId("module_toggle", static_cast<int>(i)),
-                       Rect{row.right - 50.f, row.top, row.right - 10.f, row.bottom}, enabled)) {
+        if (gui.toggle(UiId("card_toggle", static_cast<int>(i)),
+                       Rect{card.right - 40.f, card.top, card.right - 12.f, card.bottom}, enabled)) {
             module->setEnabled(enabled);
         }
 
-        if (gui.hovered(id) && gui.clicked() && !star.contains(gui.mouse())) selected_ = module;
+        if (inside && gui.clicked() && !gear.contains(gui.mouse()) &&
+            gui.mouse().x < card.right - 44.f) {
+            selected_ = module;
+            showSettings_ = true;
+        }
     }
 
     gui.endScroll();
@@ -571,40 +619,60 @@ void ClickGui::drawSettings(const Rect& rect) {
     const auto& active = theme();
 
     if (!selected_) {
-        gui.text("Sélectionnez un module pour voir ses réglages.", rect, active.textMuted, 13.f,
-                 FontWeight::Regular, TextAlign::Center);
+        showSettings_ = false;
         return;
     }
 
     Module& module = *selected_;
-    const Rect header{rect.left + 18.f, rect.top + 12.f, rect.right - 18.f, rect.top + 74.f};
+    Renderer& renderer = gui.renderer();
 
-    gui.text(module.name(), Rect{header.left, header.top, header.right - 120.f, header.top + 26.f},
-             active.text, 17.f, FontWeight::Bold);
-    gui.text(module.description(),
-             Rect{header.left, header.top + 26.f, header.right - 120.f, header.bottom},
-             active.textMuted, 12.f, FontWeight::Regular);
+    const Rect header{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 76.f};
 
-    bool enabled = module.enabled();
-    if (gui.toggle(UiId("selected_toggle"),
-                   Rect{header.right - 44.f, header.top, header.right, header.top + 26.f},
-                   enabled)) {
-        module.setEnabled(enabled);
+    const Rect back{header.left, header.top + 2.f, header.left + 30.f, header.top + 32.f};
+    if (gui.iconButton(UiId("settings_back"), back, "‹", active.text)) {
+        showSettings_ = false;
+        return;
     }
+
+    gui.text(module.name(), Rect{back.right + 12.f, header.top, header.right - 240.f,
+                                 header.top + 26.f},
+             active.text, 18.f, FontWeight::Bold);
+    gui.text(module.description(),
+             Rect{back.right + 12.f, header.top + 24.f, header.right - 240.f, header.top + 46.f},
+             active.textDim, 12.f, FontWeight::Regular);
 
     if (module.permissions().any()) {
         const auto labels = module.permissions().describe();
         gui.text("Accès : " + strings::join(labels, " · "),
-                 Rect{header.left, header.bottom - 2.f, header.right, header.bottom + 14.f},
-                 active.warning.fade(0.9f), 11.f, FontWeight::Medium);
+                 Rect{back.right + 12.f, header.top + 44.f, header.right - 240.f, header.bottom},
+                 active.warning.fade(0.85f), 10.5f, FontWeight::Medium);
     }
 
-    const Rect keybindRect{header.right - 190.f, header.top + 30.f, header.right,
-                           header.top + 58.f};
-    Keybind bind = module.keybind();
-    if (gui.keybindField(UiId("module_keybind"), keybindRect, bind)) module.keybind() = bind;
+    const Rect star{header.right - 210.f, header.top + 2.f, header.right - 182.f, header.top + 30.f};
+    if (gui.iconButton(UiId("settings_fav"), star, module.favourite() ? "★" : "☆",
+                       module.favourite() ? active.liveAccent() : active.textDim)) {
+        module.setFavourite(!module.favourite());
+    }
 
-    const Rect view{rect.left + 8.f, rect.top + 92.f, rect.right - 8.f, rect.bottom - 8.f};
+    Keybind bind = module.keybind();
+    if (gui.keybindField(UiId("module_keybind"),
+                         Rect{header.right - 176.f, header.top + 2.f, header.right - 48.f,
+                              header.top + 30.f},
+                         bind)) {
+        module.keybind() = bind;
+    }
+
+    bool enabled = module.enabled();
+    if (gui.toggle(UiId("selected_toggle"),
+                   Rect{header.right - 34.f, header.top + 2.f, header.right, header.top + 30.f},
+                   enabled)) {
+        module.setEnabled(enabled);
+    }
+
+    renderer.line({rect.left + 20.f, header.bottom}, {rect.right - 20.f, header.bottom},
+                  active.border.fade(0.6f), 1.f);
+
+    const Rect view{rect.left + 12.f, header.bottom + 8.f, rect.right - 12.f, rect.bottom - 8.f};
 
     float contentHeight = 8.f;
     for (const Setting& setting : module.settings.list()) {
