@@ -305,6 +305,121 @@ bool InstanceManager::patchManifest(const std::filesystem::path& manifest,
     return true;
 }
 
+size_t InstanceManager::cloneFiles(const std::filesystem::path& source,
+                                  const std::filesystem::path& destination, CloneMode mode,
+                                  const ProgressFn& onProgress) {
+    std::error_code ec;
+    std::filesystem::create_directories(destination, ec);
+
+    size_t total = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(source, ec)) {
+        if (entry.is_regular_file(ec)) ++total;
+    }
+
+    size_t done = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(source, ec)) {
+        const auto relative = std::filesystem::relative(entry.path(), source, ec);
+        const auto target = destination / relative;
+
+        if (entry.is_directory(ec)) {
+            std::filesystem::create_directories(target, ec);
+            continue;
+        }
+        if (!entry.is_regular_file(ec)) continue;
+
+        std::filesystem::create_directories(target.parent_path(), ec);
+
+        if (mode == CloneMode::Link) {
+            std::filesystem::create_hard_link(entry.path(), target, ec);
+            if (ec) {
+                ec.clear();
+                std::filesystem::copy_file(entry.path(), target,
+                                           std::filesystem::copy_options::overwrite_existing, ec);
+            }
+        } else {
+            std::filesystem::copy_file(entry.path(), target,
+                                       std::filesystem::copy_options::overwrite_existing, ec);
+        }
+
+        ++done;
+        if (onProgress && (done % 64 == 0 || done == total)) {
+            onProgress(done, total, relative.string());
+        }
+    }
+
+    return done;
+}
+
+std::vector<InstanceManager::VersionSource> InstanceManager::availableVersions() {
+    std::vector<VersionSource> sources;
+
+    std::string installedVersion;
+    if (const auto installed = findInstalledGame(&installedVersion)) {
+        sources.push_back(VersionSource{installedVersion, *installed, true});
+    }
+
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(Paths::versions(), ec)) {
+        if (!entry.is_directory(ec)) continue;
+        if (!std::filesystem::exists(entry.path() / kGameExecutable, ec)) continue;
+
+        const std::string version = entry.path().filename().string();
+        const bool known = std::ranges::any_of(
+            sources, [&](const VersionSource& v) { return v.version == version; });
+        if (known) continue;
+
+        sources.push_back(VersionSource{version, entry.path(), false});
+    }
+
+    std::ranges::sort(sources, [](const VersionSource& a, const VersionSource& b) {
+        return a.version > b.version;
+    });
+
+    return sources;
+}
+
+bool InstanceManager::setVersion(Instance& instance, const VersionSource& source,
+                                 const ProgressFn& onProgress, std::string* error) {
+    const auto fail = [&](std::string message) {
+        Log::error(kLog, "version switch failed: {}", message);
+        if (error) *error = std::move(message);
+        return false;
+    };
+
+    if (instance.running() && Process::isRunning(instance.pid)) {
+        return fail("arrêtez l'instance avant de changer sa version");
+    }
+
+    std::error_code ec;
+    if (!std::filesystem::exists(source.root / kGameExecutable, ec)) {
+        return fail("cette version n'est plus disponible sur le disque");
+    }
+
+    unregisterInstance(instance, nullptr);
+
+    // Worlds and the Xbox sign-in live in the AppContainer's own data container,
+    // not here, so replacing the install root keeps them.
+    std::filesystem::remove_all(instance.root, ec);
+
+    const size_t done = cloneFiles(source.root, instance.root, CloneMode::Link, onProgress);
+
+    const std::string packageName = "Velyx." + instance.id;
+    if (!patchManifest(instance.root / "AppxManifest.xml", packageName,
+                       "Minecraft - " + instance.name, error)) {
+        return false;
+    }
+
+    Process::grantAppContainerAccess(instance.root);
+
+    if (!registerInstance(instance, error)) return false;
+
+    instance.gameVersion = source.version;
+    save();
+
+    Log::info(kLog, "instance '{}' switched to {} ({} files)", instance.name, source.version, done);
+    return true;
+}
+
 bool InstanceManager::create(const std::string& name, CloneMode mode, const ProgressFn& onProgress,
                              std::string* error) {
     const auto fail = [&](std::string message) {
@@ -342,49 +457,14 @@ bool InstanceManager::create(const std::string& name, CloneMode mode, const Prog
     }
     std::filesystem::create_directories(instance.root, ec);
 
-    size_t total = 0;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(*source, ec)) {
-        if (entry.is_regular_file(ec)) ++total;
-    }
-
-    size_t done = 0;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(*source, ec)) {
-        const auto relative = std::filesystem::relative(entry.path(), *source, ec);
-        const auto destination = instance.root / relative;
-
-        if (entry.is_directory(ec)) {
-            std::filesystem::create_directories(destination, ec);
-            continue;
-        }
-        if (!entry.is_regular_file(ec)) continue;
-
-        std::filesystem::create_directories(destination.parent_path(), ec);
-
-        if (mode == CloneMode::Link) {
-            std::filesystem::create_hard_link(entry.path(), destination, ec);
-
-            if (ec) {
-                ec.clear();
-                std::filesystem::copy_file(entry.path(), destination,
-                                           std::filesystem::copy_options::overwrite_existing, ec);
-            }
-        } else {
-            std::filesystem::copy_file(entry.path(), destination,
-                                       std::filesystem::copy_options::overwrite_existing, ec);
-        }
-
-        ++done;
-        if (onProgress && (done % 64 == 0 || done == total)) {
-            onProgress(done, total, relative.string());
-        }
-    }
+    const size_t done = cloneFiles(*source, instance.root, mode, onProgress);
 
     // A distinct package identity is what lets Windows run several copies at once,
     // each with its own data container and therefore its own Xbox sign-in.
     const std::string packageName = "Velyx." + instance.id;
     const auto manifest = instance.root / "AppxManifest.xml";
 
-    if (!patchManifest(manifest, packageName, "Minecraft — " + name, error)) {
+    if (!patchManifest(manifest, packageName, "Minecraft - " + name, error)) {
         std::filesystem::remove_all(instance.root, ec);
         return false;
     }

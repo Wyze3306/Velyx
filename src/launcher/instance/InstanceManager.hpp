@@ -49,6 +49,17 @@ public:
     enum class CloneMode { Link, Copy };
     using ProgressFn = std::function<void(size_t done, size_t total, const std::string& label)>;
 
+    struct VersionSource {
+        std::string version;
+        std::filesystem::path root;
+        bool installed = false;
+    };
+
+    [[nodiscard]] static std::vector<VersionSource> availableVersions();
+
+    bool setVersion(Instance& instance, const VersionSource& source, const ProgressFn& onProgress,
+                    std::string* error = nullptr);
+
     bool create(const std::string& name, CloneMode mode, const ProgressFn& onProgress,
                 std::string* error = nullptr);
 
@@ -65,6 +76,10 @@ public:
 
 private:
     InstanceManager() = default;
+
+    static size_t cloneFiles(const std::filesystem::path& source,
+                             const std::filesystem::path& destination, CloneMode mode,
+                             const ProgressFn& onProgress);
 
     static bool patchManifest(const std::filesystem::path& manifest, const std::string& packageName,
                               const std::string& displayName, std::string* error);
