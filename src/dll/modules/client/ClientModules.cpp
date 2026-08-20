@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <format>
 
 #include "core/Strings.hpp"
 #include "dll/Velyx.hpp"

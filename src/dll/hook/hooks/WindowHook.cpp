@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <format>
 #include <string>
 
 #include "core/Log.hpp"

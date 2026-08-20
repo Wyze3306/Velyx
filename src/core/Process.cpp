@@ -7,6 +7,7 @@
 #include <sddl.h>
 
 #include <chrono>
+#include <format>
 #include <thread>
 
 #include "Log.hpp"

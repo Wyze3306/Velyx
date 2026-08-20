@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 
 #include <velyx/Version.hpp>
 

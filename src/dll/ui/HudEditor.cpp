@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 
 #include "dll/Velyx.hpp"
 #include "dll/config/ClientConfig.hpp"

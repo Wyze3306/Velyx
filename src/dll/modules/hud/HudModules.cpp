@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <format>
 
 #include "core/Strings.hpp"
 #include "dll/Velyx.hpp"

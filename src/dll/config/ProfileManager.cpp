@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <fstream>
 
 #include "core/Log.hpp"
