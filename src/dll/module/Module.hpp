@@ -82,8 +82,8 @@ public:
 
 protected:
 
-    // Enregistre une fabrique d'abonnement, pas l'abonnement : il n'existe que
-    // pendant que le module est actif, donc un module eteint ne coute rien.
+    // Registers a subscription factory rather than the subscription itself, so it
+    // only exists while the module is enabled and a disabled module costs nothing.
     template <typename E, typename T>
     void on(void (T::*method)(E&), EventPriority priority = EventPriority::Normal) {
         subscriptions_.push_back([this, method, priority] {

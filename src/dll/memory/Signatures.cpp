@@ -116,7 +116,7 @@ bool Signatures::loadPatterns() {
         try {
             stream >> document;
         } catch (const std::exception& e) {
-            Log::error(kLog, "{} n'est pas du JSON valide : {}", path.string(), e.what());
+            Log::error(kLog, "{} is not valid JSON: {}", path.string(), e.what());
             continue;
         }
 
@@ -155,14 +155,14 @@ bool Signatures::loadPatterns() {
             }
         }
 
-        Log::info(kLog, "{} motifs et {} offsets chargés depuis {}", patternCount, offsetCount,
+        Log::info(kLog, "loaded {} patterns and {} offsets from {}", patternCount, offsetCount,
                   path.filename().string());
         loadedAny = true;
     }
 
     if (!loadedAny) {
         Log::warn(kLog,
-                  "aucun pack de signatures pour la version {} — attendu assets/signatures/{}.json. "
+                  "no signature pack for game {}, expected assets/signatures/{}.json. "
                   "Velyx will start in reduced mode.",
                   gameVersion(), key);
     }
@@ -176,7 +176,7 @@ void Signatures::scan() {
 
     const auto& text = memory::gameText();
     if (!text.valid()) {
-        Log::error(kLog, "section .text du jeu introuvable");
+        Log::error(kLog, "could not locate the game .text section");
         return;
     }
 
@@ -194,7 +194,7 @@ void Signatures::scan() {
         if (address == 0) {
             ++failedCount;
             if (result.spec.required) {
-                Log::warn(kLog, "signature requise « {} » ({}) sans correspondance", name,
+                Log::warn(kLog, "required signature '{}' ({}) did not match", name,
                           result.spec.owner.empty() ? "unowned" : result.spec.owner);
             }
             continue;
@@ -213,7 +213,7 @@ void Signatures::scan() {
 
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - start).count();
-    Log::info(kLog, "{}/{} signatures résolues en {} ms", resolvedCount,
+    Log::info(kLog, "resolved {}/{} signatures in {} ms", resolvedCount,
               resolvedCount + failedCount, elapsed);
 }
 
@@ -245,7 +245,7 @@ bool Signatures::loadCache(const std::string& cacheKey) {
         ++hits;
     }
 
-    if (hits > 0) Log::info(kLog, "{} adresses reprises du cache", hits);
+    if (hits > 0) Log::info(kLog, "reused {} cached addresses", hits);
     return hits > 0;
 }
 
@@ -287,7 +287,7 @@ void Signatures::resolveAll() {
 
     const auto absent = missing();
     if (!absent.empty()) {
-        Log::warn(kLog, "{} signature(s) non résolues : {}", absent.size(),
+        Log::warn(kLog, "{} signature(s) unresolved: {}", absent.size(),
                   strings::join(absent, ", "));
     }
 }

@@ -141,7 +141,7 @@ void createInstance() {
         [](size_t done, size_t total, const std::string&) {
 
             if (total > 0 && done % 512 == 0) {
-                Log::info(kLog, "copie {}/{}", done, total);
+                Log::info(kLog, "copying {}/{}", done, total);
             }
         },
         &error);

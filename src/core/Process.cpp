@@ -118,7 +118,7 @@ bool Process::grantAppContainerAccess(const std::filesystem::path& target) {
 
     PSID sid = nullptr;
     if (!ConvertStringSidToSidW(L"S-1-15-2-1", &sid)) {
-        Log::warn(kLog, "SID AppContainer introuvable : {}",
+        Log::warn(kLog, "could not build the AppContainer SID: {}",
                   lastErrorMessage(GetLastError()));
         return false;
     }
@@ -131,7 +131,7 @@ bool Process::grantAppContainerAccess(const std::filesystem::path& target) {
                                          nullptr, nullptr, &existing, nullptr, &descriptor);
     if (status != ERROR_SUCCESS) {
         LocalFree(sid);
-        Log::warn(kLog, "GetNamedSecurityInfo a échoué sur {} : {}",
+        Log::warn(kLog, "GetNamedSecurityInfo failed for {}: {}",
                   target.string(), lastErrorMessage(status));
         return false;
     }
@@ -156,7 +156,7 @@ bool Process::grantAppContainerAccess(const std::filesystem::path& target) {
     LocalFree(sid);
 
     if (status != ERROR_SUCCESS) {
-        Log::warn(kLog, "accès AppContainer refusé sur {} : {}",
+        Log::warn(kLog, "could not grant AppContainer access to {}: {}",
                   target.string(), lastErrorMessage(status));
         return false;
     }
@@ -166,7 +166,7 @@ bool Process::grantAppContainerAccess(const std::filesystem::path& target) {
 
 bool Process::injectLibrary(uint32_t pid, const std::filesystem::path& dll, std::string* error) {
     const auto fail = [&](std::string message) {
-        Log::error(kLog, "injection dans {} impossible : {}", pid, message);
+        Log::error(kLog, "injection into {} failed: {}", pid, message);
         if (error) *error = std::move(message);
         return false;
     };
@@ -176,7 +176,7 @@ bool Process::injectLibrary(uint32_t pid, const std::filesystem::path& dll, std:
         return fail(std::format("{} does not exist", dll.string()));
     }
 
-    // Bedrock tourne en AppContainer : sans cet ACE, LoadLibraryW renvoie 0.
+    // Bedrock runs in an AppContainer: without this ACE, LoadLibraryW returns 0.
     grantAppContainerAccess(dll);
 
     const HandleGuard process(OpenProcess(
@@ -224,7 +224,7 @@ bool Process::injectLibrary(uint32_t pid, const std::filesystem::path& dll, std:
         return fail("LoadLibraryW returned NULL inside the game process");
     }
 
-    Log::info(kLog, "{} injecté dans le pid {}", dll.filename().string(), pid);
+    Log::info(kLog, "injected {} into pid {}", dll.filename().string(), pid);
     return true;
 }
 

@@ -218,7 +218,7 @@ Vec2 HudEditor::snap(Vec2 position, const Rect& bounds, const std::vector<Rect>&
     return result;
 }
 
-// Les guides ne sont traces que sur les aretes reellement alignees.
+// Guides are drawn only for edges that actually line up.
 void HudEditor::drawGuides(Renderer& renderer, const Rect& moving, const std::vector<Rect>& others) {
     const auto& active = theme();
     const Color guide = active.liveAccent().fade(0.7f);

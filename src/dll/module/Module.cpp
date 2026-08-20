@@ -83,7 +83,7 @@ void Module::setEnabled(bool enabled, bool byUser) {
     event.byUser = byUser;
     events().emit(event);
 
-    Log::debug(kLog, "{} {}", name_, enabled_ ? "activé" : "désactivé");
+    Log::debug(kLog, "{} {}", name_, enabled_ ? "enabled" : "disabled");
 }
 
 nlohmann::json Module::save() const {

@@ -272,7 +272,7 @@ void ThemeManager::load() {
         try {
             stream >> json;
         } catch (const std::exception& e) {
-            Log::warn(kLog, "{} n'est pas du JSON valide : {}", entry.path().filename().string(), e.what());
+            Log::warn(kLog, "{} is not valid JSON: {}", entry.path().filename().string(), e.what());
             continue;
         }
 
@@ -286,7 +286,7 @@ void ThemeManager::load() {
     }
 
     current_ = themes_.front();
-    Log::info(kLog, "{} thèmes intégrés + {} personnalisés", std::size(kBuiltInNames), loaded);
+    Log::info(kLog, "{} built-in + {} user theme(s)", std::size(kBuiltInNames), loaded);
 }
 
 const Theme* ThemeManager::find(const std::string& name) const {
@@ -297,7 +297,7 @@ const Theme* ThemeManager::find(const std::string& name) const {
 bool ThemeManager::apply(const std::string& name) {
     const Theme* found = find(name);
     if (!found) {
-        Log::warn(kLog, "thème « {} » introuvable", name);
+        Log::warn(kLog, "no theme named '{}'", name);
         return false;
     }
 
@@ -307,7 +307,7 @@ bool ThemeManager::apply(const std::string& name) {
     event.name = name;
     events().emit(event);
 
-    Log::info(kLog, "thème -> {}", name);
+    Log::info(kLog, "theme -> {}", name);
     return true;
 }
 
@@ -322,7 +322,7 @@ bool ThemeManager::save(const Theme& theme) {
 
     std::ofstream stream(path);
     if (!stream) {
-        Log::error(kLog, "écriture impossible : {}", path.string());
+        Log::error(kLog, "could not write {}", path.string());
         return false;
     }
     stream << serialize(copy).dump(2);
@@ -339,7 +339,7 @@ bool ThemeManager::save(const Theme& theme) {
     event.name = copy.name;
     events().emit(event);
 
-    Log::info(kLog, "thème « {} » enregistré", copy.name);
+    Log::info(kLog, "saved theme '{}'", copy.name);
     return true;
 }
 
@@ -374,7 +374,7 @@ bool ThemeManager::importFrom(const std::filesystem::path& source, std::string* 
     try {
         stream >> json;
     } catch (const std::exception& e) {
-        Log::warn(kLog, "import impossible : {}", e.what());
+        Log::warn(kLog, "import failed: {}", e.what());
         return false;
     }
 

@@ -18,7 +18,7 @@ bool HookManager::installAll() {
     if (!initialised_) {
         const MH_STATUS status = MH_Initialize();
         if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) {
-            Log::fatal(kLog, "MH_Initialize a échoué : {}", MH_StatusToString(status));
+            Log::fatal(kLog, "MH_Initialize failed: {}", MH_StatusToString(status));
             return false;
         }
         initialised_ = true;
@@ -31,14 +31,14 @@ bool HookManager::installAll() {
 
     const MH_STATUS applied = MH_ApplyQueued();
     if (applied != MH_OK) {
-        Log::fatal(kLog, "MH_ApplyQueued a échoué : {}", MH_StatusToString(applied));
+        Log::fatal(kLog, "MH_ApplyQueued failed: {}", MH_StatusToString(applied));
         return false;
     }
 
-    Log::info(kLog, "{}/{} hooks actifs", succeeded, hooks_.size());
+    Log::info(kLog, "{}/{} hooks live", succeeded, hooks_.size());
 
     if (succeeded != static_cast<int>(hooks_.size())) {
-        Log::warn(kLog, "inactifs : {}", [this] {
+        Log::warn(kLog, "inactive: {}", [this] {
             std::string list;
             for (const auto& name : failed()) {
                 if (!list.empty()) list += ", ";
@@ -60,7 +60,7 @@ void HookManager::uninstallAll() {
     }
 
     hooks_.clear();
-    Log::info(kLog, "hooks retirés");
+    Log::info(kLog, "all hooks removed");
 }
 
 std::vector<std::string> HookManager::failed() const {

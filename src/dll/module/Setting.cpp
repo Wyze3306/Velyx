@@ -156,7 +156,7 @@ bool Settings::set(std::string_view id, const SettingValue& value) {
     if (!setting) return false;
 
     if (setting->value.index() != value.index()) {
-        Log::warn(kLog, "type incompatible pour « {} »", id);
+        Log::warn(kLog, "type mismatch writing '{}'", id);
         return false;
     }
 

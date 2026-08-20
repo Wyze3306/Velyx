@@ -283,7 +283,7 @@ void bindGame() {
     Game& instance = Game::get();
     instance.requireSignatures();
     events().on<FrameEvent>(&instance, &Game::onFrame, EventPriority::First);
-    Log::debug(kLog, "façade SDK enregistrée");
+    Log::debug(kLog, "SDK facade bound");
 }
 
 }

@@ -92,30 +92,30 @@ void writeReport(EXCEPTION_POINTERS* info) {
     out << "Minecraft " << Signatures::get().gameVersion() << "\n";
     out << "Exception " << exceptionName(info->ExceptionRecord->ExceptionCode) << " (0x" << std::hex
         << info->ExceptionRecord->ExceptionCode << std::dec << ")\n";
-    out << "Adresse 0x" << std::hex << address << std::dec << "\n";
-    out << "Origine " << (insideVelyx ? "Velyx" : "jeu ou pilote") << "\n";
-    out << "Dernier module actif : " << breadcrumb << "\n\n";
+    out << "Address 0x" << std::hex << address << std::dec << "\n";
+    out << "Origin " << (insideVelyx ? "Velyx" : "game or driver") << "\n";
+    out << "Last active module: " << breadcrumb << "\n\n";
 
     if (info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
         info->ExceptionRecord->NumberParameters >= 2) {
         const auto operation = info->ExceptionRecord->ExceptionInformation[0];
-        out << (operation == 0 ? "Lecture" : operation == 1 ? "Écriture" : "Exécution")
-            << " à 0x" << std::hex << info->ExceptionRecord->ExceptionInformation[1] << std::dec
+        out << (operation == 0 ? "Read" : operation == 1 ? "Write" : "Execute")
+            << " at 0x" << std::hex << info->ExceptionRecord->ExceptionInformation[1] << std::dec
             << "\n\n";
     }
 
-    out << "Modules actifs :\n";
+    out << "Enabled modules:\n";
     for (const Module* module : modules().enabled()) {
         out << "  - " << module->name() << " (" << module->id() << ")\n";
     }
 
     const auto missing = Signatures::get().missing();
     if (!missing.empty()) {
-        out << "\nSignatures requises manquantes :\n";
+        out << "\nMissing required signatures:\n";
         for (const std::string& name : missing) out << "  - " << name << "\n";
     }
 
-    out << "\nJournal :\n";
+    out << "\nLog:\n";
     for (const LogRecord& record : Log::recent(60)) {
         out << "  [" << toString(record.level) << "] " << record.category << " : " << record.message
             << "\n";
@@ -147,7 +147,7 @@ const char* currentBreadcrumb() { return t_breadcrumb ? t_breadcrumb : ""; }
 void install() {
     resolveSelfRange();
     g_previousFilter = SetUnhandledExceptionFilter(&handler);
-    Log::debug(kLog, "rapport de plantage armé");
+    Log::debug(kLog, "crash reporting armed");
 }
 
 void uninstall() {
@@ -175,9 +175,9 @@ std::optional<Report> lastReport() {
     std::string line;
     while (std::getline(in, line)) {
         if (strings::startsWith(line, "Exception ")) report.exception = line.substr(10);
-        else if (strings::startsWith(line, "Adresse ")) report.address = line.substr(8);
-        else if (strings::startsWith(line, "Dernier module actif : ")) report.suspect = line.substr(23);
-        else if (strings::startsWith(line, "Origine ")) report.insideVelyx = line.find("Velyx") != std::string::npos;
+        else if (strings::startsWith(line, "Address ")) report.address = line.substr(8);
+        else if (strings::startsWith(line, "Last active module: ")) report.suspect = line.substr(20);
+        else if (strings::startsWith(line, "Origin ")) report.insideVelyx = line.find("Velyx") != std::string::npos;
     }
 
     return report;

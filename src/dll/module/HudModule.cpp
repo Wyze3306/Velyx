@@ -155,8 +155,8 @@ void HudModule::moveTo(Vec2 screenPosition, Vec2 screenSize) {
                                                clamp(screenPosition.y / screenSize.y, 0.f, 1.f)}});
 }
 
-// Le re-ancrage ne doit pas deplacer l'element : la fraction stockee est
-// recalculee pour que le rectangle reste exactement ou il a ete lache.
+// Re-anchoring must not move the element: the stored fraction is recomputed so
+// the rectangle stays exactly where it was dropped.
 void HudModule::reanchorToNearestEdge(Vec2 screenSize) {
     if (screenSize.x <= 0.f || screenSize.y <= 0.f) return;
 

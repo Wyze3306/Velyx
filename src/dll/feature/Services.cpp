@@ -227,7 +227,7 @@ void SessionStats::flush() {
 
     if (std::ofstream output(path); output) {
         output << history.dump(1, '\t');
-        Log::debug(kLog, "partie enregistrée : {} ({}s)", server_, durationSeconds);
+        Log::debug(kLog, "recorded match on {} ({}s)", server_, durationSeconds);
     }
 
     Playtime::get().add(durationSeconds);
@@ -262,7 +262,7 @@ void bindServices() {
     FrameStats::get().bind();
     SessionStats::get().bind();
 
-    Log::debug(kLog, "services liés");
+    Log::debug(kLog, "services bound");
 }
 
 }

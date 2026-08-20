@@ -30,7 +30,7 @@ ClientConfig& ClientConfig::get() {
 void ClientConfig::load() {
     std::ifstream stream(clientFile());
     if (!stream) {
-        Log::info(kLog, "première exécution : configuration par défaut");
+        Log::info(kLog, "first run, using default configuration");
         return;
     }
 
@@ -38,7 +38,7 @@ void ClientConfig::load() {
     try {
         stream >> json;
     } catch (const std::exception& e) {
-        Log::warn(kLog, "client.json illisible ({}), valeurs par défaut", e.what());
+        Log::warn(kLog, "client.json unreadable ({}), using defaults", e.what());
         return;
     }
 
@@ -89,7 +89,7 @@ void ClientConfig::save() const {
 
     std::ofstream stream(clientFile());
     if (!stream) {
-        Log::error(kLog, "impossible d'écrire client.json");
+        Log::error(kLog, "could not write client.json");
         return;
     }
     stream << json.dump(2);
@@ -99,7 +99,7 @@ void ClientConfig::markSessionStarted() {
     if (!cleanShutdown) {
 
         ++crashStreak;
-        Log::warn(kLog, "la session précédente s'est terminée anormalement (série : {})",
+        Log::warn(kLog, "the previous session ended abnormally (streak: {})",
                   crashStreak);
     } else {
         crashStreak = 0;

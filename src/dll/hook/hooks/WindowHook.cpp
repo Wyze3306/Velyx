@@ -88,11 +88,11 @@ void WindowHook::attach(HWND window) {
         SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&WindowHook::wndProc)));
 
     if (!g_originalProc) {
-        Log::error(kLog, "SetWindowLongPtr a échoué : clavier et souris indisponibles");
+        Log::error(kLog, "SetWindowLongPtr failed, keyboard and mouse input are unavailable");
         return;
     }
 
-    Log::info(kLog, "attaché à la fenêtre {:#x}", reinterpret_cast<uintptr_t>(window));
+    Log::info(kLog, "attached to window {:#x}", reinterpret_cast<uintptr_t>(window));
 }
 
 HWND WindowHook::window() { return g_window; }

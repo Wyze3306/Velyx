@@ -43,7 +43,7 @@ void GraphicsContext::setCommandQueue(ID3D12CommandQueue* queue) {
     if (desc.Type != D3D12_COMMAND_LIST_TYPE_DIRECT) return;
 
     commandQueue_ = ComPtr<ID3D12CommandQueue>(queue);
-    Log::debug(kLog, "file de commandes D3D12 capturée");
+    Log::debug(kLog, "captured the D3D12 direct command queue");
 }
 
 void GraphicsContext::markDeviceLost() {
@@ -52,7 +52,7 @@ void GraphicsContext::markDeviceLost() {
 
     deviceLost_ = true;
     ready_ = false;
-    Log::warn(kLog, "périphérique perdu : ressources graphiques libérées");
+    Log::warn(kLog, "device lost, dropping graphics resources");
 
     releaseTargets();
 
@@ -78,7 +78,7 @@ bool GraphicsContext::attach(IDXGISwapChain* swapChain) {
     if (!createTargets(swapChain)) return false;
 
     ready_ = true;
-    Log::info(kLog, "overlay attaché (backend {}, {}x{})",
+    Log::info(kLog, "overlay attached ({} backend, {}x{})",
               backend_ == Backend::D3D12 ? "D3D12/11on12" : "D3D11",
               static_cast<int>(size_.x), static_cast<int>(size_.y));
     return true;
@@ -87,7 +87,7 @@ bool GraphicsContext::attach(IDXGISwapChain* swapChain) {
 bool GraphicsContext::createDeviceResources(IDXGISwapChain* swapChain) {
     DXGI_SWAP_CHAIN_DESC desc{};
     if (FAILED(swapChain->GetDesc(&desc))) {
-        Log::error(kLog, "IDXGISwapChain::GetDesc a échoué");
+        Log::error(kLog, "IDXGISwapChain::GetDesc failed");
         return false;
     }
 
@@ -110,13 +110,13 @@ bool GraphicsContext::createDeviceResources(IDXGISwapChain* swapChain) {
         if (!commandQueue_) {
 
             if (!warnedNoQueue_) {
-                Log::debug(kLog, "en attente de la file de commandes D3D12 du jeu");
+                Log::debug(kLog, "waiting for the game's D3D12 command queue");
                 warnedNoQueue_ = true;
             }
             return false;
         }
 
-        // La file doit etre celle du jeu : en creer une bloque au present.
+        // The queue must be the game's own: creating one deadlocks on present.
         IUnknown* queues[] = {commandQueue_.get()};
         UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 #ifdef VELYX_DEBUG
@@ -127,7 +127,7 @@ bool GraphicsContext::createDeviceResources(IDXGISwapChain* swapChain) {
             device12_.get(), flags, nullptr, 0, queues, 1, 0,
             device11_.put(), context11_.put(), nullptr);
         if (FAILED(hr)) {
-            Log::error(kLog, "D3D11On12CreateDevice a échoué (0x{:08X})", static_cast<unsigned>(hr));
+            Log::error(kLog, "D3D11On12CreateDevice failed (0x{:08X})", static_cast<unsigned>(hr));
             return false;
         }
 
@@ -153,14 +153,14 @@ bool GraphicsContext::createD2D(IUnknown* deviceForD2D) {
     HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, __uuidof(ID2D1Factory1),
                                    &options, reinterpret_cast<void**>(d2dFactory_.put()));
     if (FAILED(hr)) {
-        Log::error(kLog, "D2D1CreateFactory a échoué (0x{:08X})", static_cast<unsigned>(hr));
+        Log::error(kLog, "D2D1CreateFactory failed (0x{:08X})", static_cast<unsigned>(hr));
         return false;
     }
 
     hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory5),
                              reinterpret_cast<IUnknown**>(dwriteFactory_.put()));
     if (FAILED(hr)) {
-        Log::error(kLog, "DWriteCreateFactory a échoué (0x{:08X})", static_cast<unsigned>(hr));
+        Log::error(kLog, "DWriteCreateFactory failed (0x{:08X})", static_cast<unsigned>(hr));
         return false;
     }
 
@@ -174,13 +174,13 @@ bool GraphicsContext::createD2D(IUnknown* deviceForD2D) {
 
     hr = d2dFactory_->CreateDevice(dxgiDevice.get(), d2dDevice_.put());
     if (FAILED(hr)) {
-        Log::error(kLog, "ID2D1Factory1::CreateDevice a échoué (0x{:08X})", static_cast<unsigned>(hr));
+        Log::error(kLog, "ID2D1Factory1::CreateDevice failed (0x{:08X})", static_cast<unsigned>(hr));
         return false;
     }
 
     hr = d2dDevice_->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, d2dContext_.put());
     if (FAILED(hr)) {
-        Log::error(kLog, "CreateDeviceContext a échoué (0x{:08X})", static_cast<unsigned>(hr));
+        Log::error(kLog, "CreateDeviceContext failed (0x{:08X})", static_cast<unsigned>(hr));
         return false;
     }
 
@@ -211,7 +211,7 @@ bool GraphicsContext::createTargets(IDXGISwapChain* swapChain) {
             ComPtr<ID3D12Resource> backBuffer;
             if (FAILED(swapChain->GetBuffer(i, __uuidof(ID3D12Resource),
                                             reinterpret_cast<void**>(backBuffer.put())))) {
-                Log::error(kLog, "GetBuffer({}) a échoué", i);
+                Log::error(kLog, "GetBuffer({}) failed", i);
                 return false;
             }
 
@@ -223,7 +223,7 @@ bool GraphicsContext::createTargets(IDXGISwapChain* swapChain) {
                 D3D12_RESOURCE_STATE_PRESENT, __uuidof(ID3D11Resource),
                 reinterpret_cast<void**>(targets_[i].wrapped.put()));
             if (FAILED(hr)) {
-                Log::error(kLog, "CreateWrappedResource({}) a échoué (0x{:08X})", i,
+                Log::error(kLog, "CreateWrappedResource({}) failed (0x{:08X})", i,
                            static_cast<unsigned>(hr));
                 return false;
             }
@@ -236,7 +236,7 @@ bool GraphicsContext::createTargets(IDXGISwapChain* swapChain) {
         } else {
             if (FAILED(swapChain->GetBuffer(0, __uuidof(IDXGISurface),
                                             reinterpret_cast<void**>(surface.put())))) {
-                Log::error(kLog, "GetBuffer(0) en IDXGISurface a échoué");
+                Log::error(kLog, "GetBuffer(0) as IDXGISurface failed");
                 return false;
             }
         }
@@ -244,7 +244,7 @@ bool GraphicsContext::createTargets(IDXGISwapChain* swapChain) {
         const HRESULT hr = d2dContext_->CreateBitmapFromDxgiSurface(
             surface.get(), &properties, targets_[i].bitmap.put());
         if (FAILED(hr)) {
-            Log::error(kLog, "CreateBitmapFromDxgiSurface({}) a échoué (0x{:08X})", i,
+            Log::error(kLog, "CreateBitmapFromDxgiSurface({}) failed (0x{:08X})", i,
                        static_cast<unsigned>(hr));
             return false;
         }
@@ -254,8 +254,8 @@ bool GraphicsContext::createTargets(IDXGISwapChain* swapChain) {
     return true;
 }
 
-// Doit tourner avant le ResizeBuffers du jeu : DXGI refuse le redimensionnement
-// tant que nos ressources enveloppees tiennent une reference sur les back buffers.
+// Must run before the game's ResizeBuffers: DXGI refuses to resize while our
+// wrapped resources still hold references on the back buffers.
 void GraphicsContext::releaseTargets() {
     const std::lock_guard lock(mutex_);
 
@@ -333,7 +333,8 @@ void GraphicsContext::endFrame() {
         ID3D11Resource* wrapped = targets_[currentBuffer_].wrapped.get();
         device11On12_->ReleaseWrappedResources(&wrapped, 1);
 
-        // Sans ce flush le travail 11on12 n'est jamais soumis et l'overlay reste invisible.
+        // Without this flush the 11on12 work is never submitted and the overlay
+        // never appears.
         context11_->Flush();
     }
 
@@ -342,7 +343,7 @@ void GraphicsContext::endFrame() {
         hr == static_cast<HRESULT>(DXGI_ERROR_DEVICE_RESET)) {
         markDeviceLost();
     } else if (FAILED(hr)) {
-        Log::warn(kLog, "EndDraw a échoué (0x{:08X})", static_cast<unsigned>(hr));
+        Log::warn(kLog, "EndDraw failed (0x{:08X})", static_cast<unsigned>(hr));
     }
 }
 

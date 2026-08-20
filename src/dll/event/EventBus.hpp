@@ -85,8 +85,8 @@ public:
             ++emitting_;
         }
 
-        // Les handlers tournent sans le verrou : un module peut rappeler le bus,
-        // et le tenir pendant du code du jeu invite au blocage.
+        // Handlers run without the lock: a module may call back into the bus, and
+        // holding it across game code invites deadlock.
         for (const auto& entry : *entries) {
             if constexpr (std::is_base_of_v<Cancellable, E>) {
 

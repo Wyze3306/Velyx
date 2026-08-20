@@ -6,8 +6,8 @@ namespace {
 
 HMODULE g_self = nullptr;
 
-// Tout se fait hors du loader lock : creer un device D3D ou toucher au disque
-// depuis DllMain fige le jeu.
+// Everything runs off the loader lock. Creating a D3D device or touching the
+// filesystem from DllMain deadlocks the game.
 DWORD WINAPI bootstrapThread(LPVOID) {
     velyx::Velyx::get().start(g_self);
 

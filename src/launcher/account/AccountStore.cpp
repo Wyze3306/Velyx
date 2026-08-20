@@ -42,7 +42,7 @@ void AccountStore::load() {
     try {
         stream >> document;
     } catch (const std::exception& e) {
-        Log::warn(kLog, "accounts.json illisible : {}", e.what());
+        Log::warn(kLog, "accounts.json unreadable: {}", e.what());
         return;
     }
     if (!document.is_array()) return;
@@ -61,7 +61,7 @@ void AccountStore::load() {
         if (!account.id.empty()) accounts_.push_back(std::move(account));
     }
 
-    Log::info(kLog, "{} compte(s) chargé(s)", accounts_.size());
+    Log::info(kLog, "loaded {} account(s)", accounts_.size());
 }
 
 void AccountStore::save() const {

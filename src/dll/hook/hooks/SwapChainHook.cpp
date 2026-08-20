@@ -17,7 +17,7 @@ namespace {
 
 constexpr const char* kLog = "SwapChain";
 
-// Emplacements figes par l'ABI COM, inchanges depuis DXGI 1.2.
+// Slots fixed by the COM ABI, unchanged since DXGI 1.2.
 constexpr size_t kPresentIndex = 8;
 constexpr size_t kResizeBuffersIndex = 13;
 constexpr size_t kPresent1Index = 22;
@@ -120,7 +120,7 @@ bool SwapChainHook::captureVTables(void** swapChainVTable, size_t swapChainCount
                                    void** queueVTable, size_t queueCount) {
     const DummyWindow window;
     if (!window.handle()) {
-        Log::error(kLog, "fenêtre témoin impossible à créer");
+        Log::error(kLog, "could not create the probe window");
         return false;
     }
 
@@ -136,7 +136,7 @@ bool SwapChainHook::captureVTables(void** swapChainVTable, size_t swapChainCount
     ComPtr<IDXGIFactory2> factory;
     if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory2),
                                   reinterpret_cast<void**>(factory.put())))) {
-        Log::error(kLog, "CreateDXGIFactory1 a échoué");
+        Log::error(kLog, "CreateDXGIFactory1 failed");
         return false;
     }
 
@@ -157,7 +157,7 @@ bool SwapChainHook::captureVTables(void** swapChainVTable, size_t swapChainCount
                 std::memcpy(queueVTable, *reinterpret_cast<void***>(queue.get()),
                             queueCount * sizeof(void*));
 
-                Log::debug(kLog, "vtables lues depuis une swapchain témoin D3D12");
+                Log::debug(kLog, "captured vtables from a D3D12 probe swapchain");
                 return true;
             }
         }
@@ -176,12 +176,12 @@ bool SwapChainHook::captureVTables(void** swapChainVTable, size_t swapChainCount
                         swapChainCount * sizeof(void*));
             std::memset(queueVTable, 0, queueCount * sizeof(void*));
 
-            Log::debug(kLog, "vtables lues depuis une swapchain témoin D3D11");
+            Log::debug(kLog, "captured vtables from a D3D11 probe swapchain");
             return true;
         }
     }
 
-    Log::error(kLog, "aucun périphérique graphique utilisable : overlay impossible");
+    Log::error(kLog, "no usable graphics device, the overlay cannot start");
     return false;
 }
 

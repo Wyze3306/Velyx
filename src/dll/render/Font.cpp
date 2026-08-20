@@ -79,7 +79,7 @@ bool FontManager::initialize(IDWriteFactory5* factory) {
     layoutOrder_.clear();
 
     if (FAILED(factory_->CreateFontSetBuilder(setBuilder_.put()))) {
-        Log::warn(kLog, "polices embarquées indisponibles");
+        Log::warn(kLog, "bundled fonts unavailable");
         setBuilder_.reset();
     }
 
@@ -107,12 +107,12 @@ bool FontManager::loadFile(const std::filesystem::path& file) {
     ComPtr<IDWriteFontFile> fontFile;
     if (FAILED(factory_->CreateFontFileReference(file.wstring().c_str(), nullptr,
                                                  fontFile.put()))) {
-        Log::warn(kLog, "police illisible : {}", file.filename().string());
+        Log::warn(kLog, "could not open font {}", file.filename().string());
         return false;
     }
 
     if (FAILED(setBuilder_->AddFontFile(fontFile.get()))) {
-        Log::warn(kLog, "{} n'est pas une police exploitable", file.filename().string());
+        Log::warn(kLog, "{} is not a usable font file", file.filename().string());
         return false;
     }
 
@@ -135,7 +135,7 @@ int FontManager::loadDirectory(const std::filesystem::path& directory) {
 
     if (loaded > 0) {
         rebuildCollection();
-        Log::info(kLog, "{} police(s) chargée(s) depuis {}", loaded,
+        Log::info(kLog, "loaded {} bundled font file(s) from {}", loaded,
                   directory.filename().string());
     }
 
@@ -150,7 +150,7 @@ void FontManager::rebuildCollection() {
 
     collection_.reset();
     if (FAILED(factory_->CreateFontCollectionFromFontSet(fontSet.get(), collection_.put()))) {
-        Log::warn(kLog, "collection de polices impossible à créer");
+        Log::warn(kLog, "could not create the font collection");
         return;
     }
 
@@ -240,7 +240,7 @@ IDWriteTextFormat* FontManager::format(const FontSpec& spec) {
     }
 
     if (FAILED(hr) || !format) {
-        Log::error(kLog, "aucune police utilisable pour « {} »", spec.family);
+        Log::error(kLog, "no usable font for family '{}'", spec.family);
         return nullptr;
     }
 

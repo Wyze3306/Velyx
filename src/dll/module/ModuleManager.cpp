@@ -28,7 +28,7 @@ void ModuleManager::initialize() {
         if (dynamic_cast<HudModule*>(module.get())) ++hudCount;
     }
 
-    Log::info(kLog, "{} modules enregistrés ({} éléments de HUD)", modules_.size(), hudCount);
+    Log::info(kLog, "registered {} modules ({} HUD elements)", modules_.size(), hudCount);
 }
 
 void ModuleManager::shutdown() {
@@ -165,7 +165,7 @@ void ModuleManager::setSafeMode(bool safeMode) {
         ++disabled;
     }
 
-    Log::warn(kLog, "mode sans échec : {} module(s) désactivé(s)", disabled);
+    Log::warn(kLog, "safe mode: disabled {} module(s)", disabled);
 }
 
 void ModuleManager::disableAll() {

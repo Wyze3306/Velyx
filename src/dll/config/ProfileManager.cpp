@@ -46,7 +46,7 @@ nlohmann::json readJson(const std::filesystem::path& path) {
         stream >> json;
         return json;
     } catch (const std::exception& e) {
-        Log::warn(kLog, "{} illisible : {}", path.filename().string(), e.what());
+        Log::warn(kLog, "{} unreadable: {}", path.filename().string(), e.what());
         return {};
     }
 }
@@ -57,7 +57,7 @@ bool writeJson(const std::filesystem::path& path, const nlohmann::json& json) {
 
     std::ofstream stream(path);
     if (!stream) {
-        Log::error(kLog, "écriture impossible : {}", path.string());
+        Log::error(kLog, "could not write {}", path.string());
         return false;
     }
 
@@ -150,7 +150,7 @@ void ProfileManager::createStarterProfiles() {
         profiles_.push_back(profile);
     }
 
-    Log::info(kLog, "profils de départ créés ({})", starters.size());
+    Log::info(kLog, "created the starter profiles ({})", starters.size());
 }
 
 void ProfileManager::load() {
@@ -183,7 +183,7 @@ void ProfileManager::load() {
 
     events().on<WorldJoinEvent>(this, &ProfileManager::onWorldJoin, EventPriority::High);
 
-    Log::info(kLog, "{} profil(s) disponibles", profiles_.size());
+    Log::info(kLog, "{} profile(s) available", profiles_.size());
 }
 
 nlohmann::json ProfileManager::serializeCurrent() const {
@@ -203,7 +203,7 @@ void ProfileManager::saveCurrent() {
     if (Profile* stored = findMutable(current_.name)) *stored = current_;
 
     if (writeJson(fileFor(current_.name), serializeCurrent())) {
-        Log::debug(kLog, "profil '{}' enregistré", current_.name);
+        Log::debug(kLog, "saved profile '{}'", current_.name);
     }
 }
 
@@ -218,7 +218,7 @@ bool ProfileManager::switchTo(const std::string& name, bool automatic) {
     }
 
     if (!target) {
-        Log::warn(kLog, "profil inconnu : {}", name);
+        Log::warn(kLog, "unknown profile: {}", name);
         return false;
     }
     if (current_.name == name) return true;
@@ -240,7 +240,7 @@ bool ProfileManager::switchTo(const std::string& name, bool automatic) {
     event.automatic = automatic;
     events().emit(event);
 
-    Log::info(kLog, "profil -> {}{}", name, automatic ? " (automatique)" : "");
+    Log::info(kLog, "profile -> {}{}", name, automatic ? " (automatique)" : "");
     return true;
 }
 
@@ -266,7 +266,7 @@ bool ProfileManager::create(const std::string& name, const std::string& copyFrom
     if (!writeJson(fileFor(finalName), document)) return false;
 
     profiles_.push_back(profile);
-    Log::info(kLog, "profil '{}' créé", finalName);
+    Log::info(kLog, "created profile '{}'", finalName);
     return true;
 }
 
@@ -279,7 +279,7 @@ bool ProfileManager::remove(const std::string& name) {
     if (!profile) return false;
 
     if (profile->isDefault) {
-        Log::warn(kLog, "le profil par défaut ne peut pas être supprimé");
+        Log::warn(kLog, "the default profile cannot be deleted");
         return false;
     }
 
@@ -306,7 +306,7 @@ bool ProfileManager::rename(const std::string& from, const std::string& to) {
     std::error_code ec;
     std::filesystem::rename(Paths::profile(from), Paths::profile(to), ec);
     if (ec) {
-        Log::error(kLog, "renommage impossible : {}", ec.message());
+        Log::error(kLog, "rename failed: {}", ec.message());
         return false;
     }
 
@@ -392,7 +392,7 @@ bool ProfileManager::snapshot(const std::string& label) {
         }
     }
 
-    Log::debug(kLog, "point de restauration '{}' créé", label);
+    Log::debug(kLog, "created restore point '{}'", label);
     return true;
 }
 
@@ -436,7 +436,7 @@ bool ProfileManager::restore(const std::string& profile, const std::string& vers
     applyDocument(document);
     saveCurrent();
 
-    Log::info(kLog, "profil '{}' restauré depuis {}", profile, versionId);
+    Log::info(kLog, "restored profile '{}' from {}", profile, versionId);
     return true;
 }
 
@@ -450,14 +450,14 @@ bool ProfileManager::importCode(std::string_view code, std::string* importedName
 
     std::string_view body = strings::trim(code);
     if (!strings::startsWith(body, kPrefix)) {
-        Log::warn(kLog, "code de partage non reconnu");
+        Log::warn(kLog, "unrecognised share code");
         return false;
     }
     body.remove_prefix(kPrefix.size());
 
     const auto decoded = strings::base64Decode(body);
     if (!decoded) {
-        Log::warn(kLog, "code de partage corrompu");
+        Log::warn(kLog, "share code is corrupt");
         return false;
     }
 
@@ -465,7 +465,7 @@ bool ProfileManager::importCode(std::string_view code, std::string* importedName
     try {
         document = nlohmann::json::parse(*decoded);
     } catch (const std::exception& e) {
-        Log::warn(kLog, "code de partage illisible : {}", e.what());
+        Log::warn(kLog, "share code could not be parsed: {}", e.what());
         return false;
     }
 
@@ -481,7 +481,7 @@ bool ProfileManager::importCode(std::string_view code, std::string* importedName
     profiles_.push_back(profile);
     if (importedName) *importedName = profile.name;
 
-    Log::info(kLog, "profil '{}' importé", profile.name);
+    Log::info(kLog, "imported profile '{}'", profile.name);
     return true;
 }
 

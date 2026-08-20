@@ -82,7 +82,7 @@ Pattern::Pattern(std::string_view ida) {
 
         const int high = hexValue(c);
         if (high < 0 || index + 1 >= ida.size()) {
-            Log::error(kLog, "motif « {} » invalide à l'index {}", ida, index);
+            Log::error(kLog, "malformed pattern '{}' at index {}", ida, index);
             bytes_.clear();
             mask_.clear();
             return;
@@ -90,7 +90,7 @@ Pattern::Pattern(std::string_view ida) {
 
         const int low = hexValue(ida[index + 1]);
         if (low < 0) {
-            Log::error(kLog, "motif « {} » invalide à l'index {}", ida, index + 1);
+            Log::error(kLog, "malformed pattern '{}' at index {}", ida, index + 1);
             bytes_.clear();
             mask_.clear();
             return;
@@ -188,8 +188,8 @@ uintptr_t followChain(uintptr_t base, const std::vector<int>& offsets) {
 bool readable(const void* pointer, size_t size) {
     if (!pointer) return false;
 
-    // Page nulle : rien de valide n'y vit, et ce test seul attrape la plupart
-    // des lectures apres liberation.
+    // Null page: nothing valid lives there, and this check alone catches most
+    // use-after-free reads.
     if (reinterpret_cast<uintptr_t>(pointer) < 0x10000) return false;
 
     MEMORY_BASIC_INFORMATION info{};

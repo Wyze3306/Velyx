@@ -52,7 +52,7 @@ bool Renderer::begin(ID2D1DeviceContext* context, Vec2 screenSize, float deltaSe
     if (!solidBrush_) {
         if (FAILED(context_->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White),
                                                    solidBrush_.put()))) {
-            Log::error(kLog, "création du pinceau impossible");
+            Log::error(kLog, "CreateSolidColorBrush failed");
             context_ = nullptr;
             return false;
         }
@@ -69,11 +69,11 @@ bool Renderer::begin(ID2D1DeviceContext* context, Vec2 screenSize, float deltaSe
 void Renderer::end() {
 
     if (clipDepth_ != 0) {
-        Log::warn(kLog, "pile de découpe déséquilibrée ({} restantes)", clipDepth_);
+        Log::warn(kLog, "unbalanced clip stack ({} left open)", clipDepth_);
         while (clipDepth_ > 0) popClip();
     }
     if (!transformStack_.empty()) {
-        Log::warn(kLog, "pile de transformations déséquilibrée ({} restantes)", transformStack_.size());
+        Log::warn(kLog, "unbalanced transform stack ({} left open)", transformStack_.size());
         while (!transformStack_.empty()) popTransform();
     }
 
@@ -530,7 +530,7 @@ void Renderer::ensureWic() {
     const HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                                         __uuidof(IWICImagingFactory),
                                         reinterpret_cast<void**>(wic_.put()));
-    if (FAILED(hr)) Log::warn(kLog, "WIC indisponible (0x{:08X}) : images désactivées",
+    if (FAILED(hr)) Log::warn(kLog, "WIC unavailable (0x{:08X}), images disabled",
                               static_cast<unsigned>(hr));
 }
 
@@ -604,7 +604,7 @@ bool Renderer::snapshot(const Rect& rect) {
 
         if (FAILED(context_->CreateBitmap(size, nullptr, 0, properties, blurSnapshot_.put()))) {
             effectsEnabled_ = false;
-            Log::warn(kLog, "effets desactives : allocation du tampon impossible");
+            Log::warn(kLog, "effects disabled: snapshot bitmap allocation failed");
             return false;
         }
         blurSnapshotSize_ = {rect.width(), rect.height()};

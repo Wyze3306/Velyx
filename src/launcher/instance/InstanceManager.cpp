@@ -150,7 +150,7 @@ void InstanceManager::load() {
     try {
         stream >> document;
     } catch (const std::exception& e) {
-        Log::warn(kLog, "instances.json illisible : {}", e.what());
+        Log::warn(kLog, "instances.json unreadable: {}", e.what());
         return;
     }
 
@@ -174,7 +174,7 @@ void InstanceManager::load() {
         if (!instance.id.empty()) instances_.push_back(std::move(instance));
     }
 
-    Log::info(kLog, "{} instance(s) chargée(s)", instances_.size());
+    Log::info(kLog, "loaded {} instance(s)", instances_.size());
 }
 
 void InstanceManager::save() const {
@@ -308,7 +308,7 @@ bool InstanceManager::patchManifest(const std::filesystem::path& manifest,
 bool InstanceManager::create(const std::string& name, CloneMode mode, const ProgressFn& onProgress,
                              std::string* error) {
     const auto fail = [&](std::string message) {
-        Log::error(kLog, "création impossible : {}", message);
+        Log::error(kLog, "could not create the instance: {}", message);
         if (error) *error = std::move(message);
         return false;
     };
@@ -379,9 +379,8 @@ bool InstanceManager::create(const std::string& name, CloneMode mode, const Prog
         }
     }
 
-    // Identite de paquet distincte : c'est ce qui autorise Windows a lancer
-    // plusieurs copies, chacune avec son propre conteneur de donnees et sa
-    // propre connexion Xbox.
+    // A distinct package identity is what lets Windows run several copies at once,
+    // each with its own data container and therefore its own Xbox sign-in.
     const std::string packageName = "Velyx." + instance.id;
     const auto manifest = instance.root / "AppxManifest.xml";
 
@@ -402,7 +401,7 @@ bool InstanceManager::create(const std::string& name, CloneMode mode, const Prog
     instances_.push_back(instance);
     save();
 
-    Log::info(kLog, "instance « {} » créée ({} fichiers)", name, done);
+    Log::info(kLog, "created instance '{}' ({} files)", name, done);
     return true;
 }
 
@@ -439,7 +438,7 @@ bool InstanceManager::registerInstance(Instance& instance, std::string* error) {
     if (!trimmed.empty()) instance.packageFamilyName = trimmed;
 
     instance.registered = true;
-    Log::info(kLog, "instance « {} » enregistrée ({})", instance.name, instance.packageFamilyName);
+    Log::info(kLog, "registered instance '{}' ({})", instance.name, instance.packageFamilyName);
     return true;
 }
 
@@ -459,7 +458,7 @@ bool InstanceManager::unregisterInstance(Instance& instance, std::string* error)
 
 bool InstanceManager::launch(Instance& instance, std::string* error) {
     const auto fail = [&](std::string message) {
-        Log::error(kLog, "lancement impossible : {}", message);
+        Log::error(kLog, "launch failed: {}", message);
         if (error) *error = std::move(message);
         return false;
     };
@@ -486,7 +485,7 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
         manager->Release();
 
         if (FAILED(hr)) {
-            return fail(std::format("ActivateApplication a échoué (0x{:08X})",
+            return fail(std::format("ActivateApplication failed (0x{:08X})",
                                     static_cast<unsigned>(hr)));
         }
 
@@ -497,7 +496,7 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
     save();
 
     if (!instance.injectVelyx) {
-        Log::info(kLog, "instance « {} » lancée (pid {}, sans Velyx)", instance.name, instance.pid);
+        Log::info(kLog, "launched instance '{}' (pid {}, without Velyx)", instance.name, instance.pid);
         return true;
     }
 
@@ -514,7 +513,7 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
         return false;
     }
 
-    Log::info(kLog, "instance « {} » lancée avec Velyx (pid {})", instance.name, instance.pid);
+    Log::info(kLog, "launched instance '{}' with Velyx (pid {})", instance.name, instance.pid);
     return true;
 }
 

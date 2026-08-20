@@ -49,7 +49,7 @@ void Playtime::load() {
     try {
         stream >> document;
     } catch (const std::exception& e) {
-        Log::warn(kLog, "playtime.json illisible : {}", e.what());
+        Log::warn(kLog, "playtime.json unreadable: {}", e.what());
         return;
     }
     if (!document.is_object()) return;

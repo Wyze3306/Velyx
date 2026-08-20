@@ -130,7 +130,7 @@ Result capture(const std::filesystem::path& destination) {
         return fail("encodage PNG interrompu");
     }
 
-    Log::info(kLog, "capture enregistrée : {}", destination.string());
+    Log::info(kLog, "screenshot saved to {}", destination.string());
     return Result{true, destination, {}};
 }
 
