@@ -1,0 +1,16 @@
+* text=auto eol=lf
+
+*.sln text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.png binary
+*.jpg binary
+*.ttf binary
+*.otf binary
+*.ico binary
+*.dll binary
+*.exe binary
+*.lib binary
+
+external/** linguist-vendored

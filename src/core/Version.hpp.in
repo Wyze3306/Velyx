@@ -1,0 +1,15 @@
+#pragma once
+
+namespace velyx::version {
+
+inline constexpr int kMajor = @PROJECT_VERSION_MAJOR@;
+inline constexpr int kMinor = @PROJECT_VERSION_MINOR@;
+inline constexpr int kPatch = @PROJECT_VERSION_PATCH@;
+
+inline constexpr const char* kString = "@PROJECT_VERSION@";
+inline constexpr const char* kCommit = "@VELYX_COMMIT@";
+inline constexpr const char* kChannel = "@VELYX_CHANNEL@";
+
+inline constexpr const char* kFull = "@PROJECT_VERSION@-@VELYX_CHANNEL@+@VELYX_COMMIT@";
+
+}
