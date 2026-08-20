@@ -29,6 +29,7 @@ private:
         Keybinds,
         Diagnostics,
         History,
+        Captures,
     };
 
     void onRender(RenderTopEvent& event);
@@ -47,6 +48,7 @@ private:
     void drawKeybindsPage(const Rect& rect);
     void drawDiagnosticsPage(const Rect& rect);
     void drawHistoryPage(const Rect& rect);
+    void drawCapturesPage(const Rect& rect);
 
     float drawSetting(const Rect& rect, Module& owner, Setting& setting, int index);
     [[nodiscard]] static float settingHeight(const Setting& setting);

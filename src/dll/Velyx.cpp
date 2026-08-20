@@ -9,6 +9,7 @@
 #include "dll/feature/CrashReporter.hpp"
 #include "dll/feature/Playtime.hpp"
 #include "dll/feature/Services.hpp"
+#include "dll/feature/Updates.hpp"
 #include "dll/hook/HookManager.hpp"
 #include "dll/hook/hooks/SwapChainHook.hpp"
 #include "dll/hook/hooks/WindowHook.hpp"
@@ -77,7 +78,7 @@ void Velyx::bootstrap() {
     Log::init(Paths::logs() / "velyx.log", false);
 #endif
 
-    Log::info(kLog, "Velyx {} démarre", version::kFull);
+    Log::info(kLog, "Velyx {} starting", version::kFull);
 
     ClientConfig& settings = config();
     settings.load();
@@ -87,7 +88,7 @@ void Velyx::bootstrap() {
 
     const bool safeMode = settings.shouldStartInSafeMode();
     if (safeMode) {
-        Log::warn(kLog, "démarrage en mode sans échec après {} plantages", settings.crashStreak);
+        Log::warn(kLog, "starting in safe mode after {} crashes", settings.crashStreak);
     }
 
     sdk::bindGame();
@@ -98,14 +99,15 @@ void Velyx::bootstrap() {
 
     if (!signatures.healthy()) {
         Log::warn(kLog,
-                  "certaines signatures manquent : les modules qui lisent le jeu resteront "
-                  "en mode dégradé (voir assets/signatures/).");
+                  "some signatures are missing; modules that read the game stay in reduced "
+                  "mode (see assets/signatures/)");
     }
 
     ThemeManager::get().load();
 
     bindServices();
     Playtime::get().load();
+    updates::check(settings.updateChannel);
 
     ModuleManager& manager = modules();
     manager.setSafeMode(safeMode);
@@ -114,6 +116,12 @@ void Velyx::bootstrap() {
     ProfileManager& profileManager = profiles();
     profileManager.load();
     profileManager.switchTo(settings.activeProfile);
+
+    if (!settings.onboardingCompleted) {
+        if (Module* onboarding = manager.find("onboarding")) {
+            onboarding->setEnabled(true, false);
+        }
+    }
 
     HookManager& hooks = HookManager::get();
     hooks.add<SwapChainHook>();
@@ -126,13 +134,13 @@ void Velyx::bootstrap() {
     events().on<DeviceLostEvent>(this, &Velyx::onDeviceLost, EventPriority::First);
 
     if (!hooks.installAll()) {
-        Log::fatal(kLog, "les hooks n'ont pas pu être installés — arrêt");
+        Log::fatal(kLog, "hooks could not be installed, stopping");
         shutdown();
         return;
     }
 
     ready_.store(true, std::memory_order_release);
-    Log::info(kLog, "prêt — {} module(s), profil '{}', thème '{}'", manager.all().size(),
+    Log::info(kLog, "ready: {} module(s), profile '{}', theme '{}'", manager.all().size(),
               profileManager.current().name, theme().name);
 }
 
@@ -149,7 +157,7 @@ void Velyx::initialiseGraphicsOnce() {
     fonts.loadDirectory(Paths::assets() / "fonts");
 
     graphicsInitialised_ = true;
-    Log::info(kLog, "rendu initialisé ({}x{})", static_cast<int>(graphics.size().x),
+    Log::info(kLog, "renderer ready ({}x{})", static_cast<int>(graphics.size().x),
               static_cast<int>(graphics.size().y));
 }
 
@@ -228,7 +236,7 @@ void Velyx::onDeviceLost(DeviceLostEvent& event) {
 
 void Velyx::requestEject() {
     if (ejecting_.exchange(true)) return;
-    Log::info(kLog, "éjection demandée");
+    Log::info(kLog, "eject requested");
     shutdown();
 }
 
@@ -240,6 +248,7 @@ void Velyx::shutdown() {
 
     HookManager::get().uninstallAll();
     crash::uninstall();
+    updates::shutdown();
     WindowHook::setCaptureInput(false);
 
     modules().shutdown();
@@ -249,7 +258,7 @@ void Velyx::shutdown() {
     FontManager::get().shutdown();
     GraphicsContext::get().shutdown();
 
-    Log::info(kLog, "arrêté proprement");
+    Log::info(kLog, "shut down cleanly");
     Log::shutdown();
 
     running_.store(false, std::memory_order_release);

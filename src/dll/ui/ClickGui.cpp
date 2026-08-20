@@ -8,6 +8,7 @@
 
 #include <velyx/Version.hpp>
 
+#include "core/Paths.hpp"
 #include "core/Strings.hpp"
 #include "dll/Velyx.hpp"
 #include "dll/config/ClientConfig.hpp"
@@ -16,7 +17,9 @@
 #include "dll/hook/hooks/WindowHook.hpp"
 #include "dll/feature/CrashReporter.hpp"
 #include "dll/feature/Playtime.hpp"
+#include "dll/feature/Clips.hpp"
 #include "dll/feature/Screenshot.hpp"
+#include "dll/feature/Updates.hpp"
 #include "dll/feature/Services.hpp"
 #include "dll/memory/Signatures.hpp"
 #include "dll/module/ModuleManager.hpp"
@@ -52,6 +55,7 @@ const SidebarItem kSidebar[] = {
     {"Thèmes", "◐", 7, true},
     {"Profils", "▣", 8, false},
     {"Historique", "◷", 11, false},
+    {"Captures", "▦", 12, false},
     {"Raccourcis", "⌨", 9, false},
     {"Diagnostic", "!", 10, false},
 };
@@ -214,6 +218,9 @@ void ClickGui::onRender(RenderTopEvent& event) {
             break;
         case Page::History:
             drawHistoryPage(content);
+            break;
+        case Page::Captures:
+            drawCapturesPage(content);
             break;
         default: {
             const Rect list{content.left, content.top, content.left + kListWidth, content.bottom};
@@ -953,6 +960,65 @@ void ClickGui::drawDiagnosticsPage(const Rect& rect) {
 
     float top = rect.top + 112.f;
 
+    const auto& update = updates::status();
+
+    const Rect updateBanner{rect.left + 20.f, top, rect.right - 20.f, top + 74.f};
+    top = updateBanner.bottom + 12.f;
+
+    const Color updateColour = update.updateAvailable ? active.liveAccent() : active.textMuted;
+    gui.renderer().fillRounded(updateBanner, active.surface.fade(0.45f), active.radius);
+    gui.renderer().strokeRounded(updateBanner, updateColour.fade(0.5f), active.radius, 1.f);
+
+    const std::string headline =
+        update.checking      ? "Recherche de mises à jour…"
+        : !update.checked    ? "Mises à jour non vérifiées"
+        : !update.error.empty() ? "Vérification impossible"
+        : update.updateAvailable
+            ? std::format("Version {} disponible", update.latest.tag)
+            : "Velyx est à jour";
+
+    gui.text(headline,
+             Rect{updateBanner.left + 14.f, updateBanner.top + 8.f, updateBanner.right - 250.f,
+                  updateBanner.top + 32.f},
+             update.updateAvailable ? active.liveAccent() : active.text, 13.f,
+             FontWeight::SemiBold);
+
+    const std::string detail =
+        !update.error.empty()
+            ? update.error
+            : std::format("Version installée {} · canal {}", version::kFull,
+                          config().updateChannel);
+
+    gui.text(detail,
+             Rect{updateBanner.left + 14.f, updateBanner.top + 32.f, updateBanner.right - 250.f,
+                  updateBanner.bottom - 8.f},
+             active.textMuted, 11.5f, FontWeight::Regular);
+
+    std::string channel = config().updateChannel;
+    if (gui.dropdown(UiId("update_channel"),
+                     Rect{updateBanner.right - 240.f, updateBanner.top + 10.f,
+                          updateBanner.right - 130.f, updateBanner.top + 40.f},
+                     channel, {"stable", "beta", "nightly"})) {
+        config().updateChannel = channel;
+        config().save();
+        updates::check(channel);
+    }
+
+    if (gui.button(UiId("update_check"),
+                   Rect{updateBanner.right - 120.f, updateBanner.top + 10.f,
+                        updateBanner.right - 14.f, updateBanner.top + 40.f},
+                   "Vérifier", false, !update.checking)) {
+        updates::check(config().updateChannel);
+    }
+
+    if (update.updateAvailable &&
+        gui.button(UiId("update_open"),
+                   Rect{updateBanner.right - 240.f, updateBanner.top + 44.f,
+                        updateBanner.right - 14.f, updateBanner.bottom - 8.f},
+                   "Voir les nouveautés", true)) {
+        updates::openReleasePage();
+    }
+
     if (const auto report = crash::lastReport()) {
         const Rect crashBanner{rect.left + 20.f, top, rect.right - 20.f, top + 74.f};
         top = crashBanner.bottom + 12.f;
@@ -1123,6 +1189,114 @@ void ClickGui::drawHistoryPage(const Rect& rect) {
     }
 
     gui.endScroll();
+}
+
+
+void ClickGui::drawCapturesPage(const Rect& rect) {
+    Ui& gui = ui();
+    Renderer& renderer = gui.renderer();
+    const auto& active = theme();
+
+    gui.text("Captures", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
+             active.text, 17.f, FontWeight::Bold);
+
+    const auto shots = screenshot::gallery(60);
+    const auto markers = Clips::get().recent(12);
+
+    gui.text(std::format("{} capture(s) · {} marqueur(s)", shots.size(), markers.size()),
+             Rect{rect.left + 20.f, rect.top + 38.f, rect.right - 20.f, rect.top + 58.f},
+             active.textMuted, 12.f);
+
+    if (gui.button(UiId("open_shots_folder"),
+                   Rect{rect.right - 190.f, rect.top + 16.f, rect.right - 20.f, rect.top + 46.f},
+                   "Ouvrir le dossier")) {
+        screenshot::revealInExplorer(Paths::screenshots());
+    }
+
+    const Rect gallery{rect.left + 20.f, rect.top + 70.f, rect.right - 250.f, rect.bottom - 16.f};
+
+    if (shots.empty()) {
+        gui.text("Aucune capture pour l'instant. Le mode capture range les images par serveur "
+                 "et par date.",
+                 gallery, active.textMuted, 12.5f, FontWeight::Regular, TextAlign::Center);
+    } else {
+        constexpr int kColumns = 3;
+        const float cellWidth = (gallery.width() - 12.f * (kColumns - 1)) / kColumns;
+        const float cellHeight = cellWidth * 0.62f;
+        const int rows = (static_cast<int>(shots.size()) + kColumns - 1) / kColumns;
+
+        const float offset = gui.beginScroll(UiId("shot_grid"), gallery,
+                                             static_cast<float>(rows) * (cellHeight + 34.f));
+
+        for (size_t i = 0; i < shots.size(); ++i) {
+            const int column = static_cast<int>(i) % kColumns;
+            const int row = static_cast<int>(i) / kColumns;
+
+            const float x = gallery.left + static_cast<float>(column) * (cellWidth + 12.f);
+            const float y = gallery.top + offset + static_cast<float>(row) * (cellHeight + 34.f);
+
+            const Rect cell{x, y, x + cellWidth, y + cellHeight};
+            if (cell.bottom < gallery.top - 40.f || cell.top > gallery.bottom + 40.f) continue;
+
+            const UiId id("shot", static_cast<int>(i));
+            const float hover = gui.animate(id, cell.contains(gui.mouse()));
+
+            renderer.fillRounded(cell, active.surface.fade(0.6f), active.radius);
+
+            if (ID2D1Bitmap1* bitmap = renderer.image(shots[i].path)) {
+                renderer.drawImageRounded(bitmap, cell.inflated(-2.f), active.radius,
+                                          0.85f + hover * 0.15f);
+            } else {
+                gui.text("aperçu indisponible", cell, active.textMuted, 11.f, FontWeight::Regular,
+                         TextAlign::Center);
+            }
+
+            renderer.strokeRounded(cell, active.border.fade(0.4f + hover * 0.6f), active.radius,
+                                   active.borderWidth);
+
+            gui.text(shots[i].server + "  ·  " + shots[i].day,
+                     Rect{cell.left + 2.f, cell.bottom + 4.f, cell.right, cell.bottom + 24.f},
+                     active.textMuted, 11.f, FontWeight::Regular);
+
+            if (cell.contains(gui.mouse()) && gui.clicked()) {
+                screenshot::revealInExplorer(shots[i].path);
+            }
+        }
+
+        gui.endScroll();
+    }
+
+    const Rect side{rect.right - 230.f, rect.top + 70.f, rect.right - 20.f, rect.bottom - 16.f};
+    gui.sectionHeader("Marqueurs", Rect{side.left, side.top, side.right, side.top + 20.f});
+
+    if (markers.empty()) {
+        gui.text("Posez un marqueur en jeu pour retrouver un moment dans un enregistrement.",
+                 Rect{side.left, side.top + 28.f, side.right, side.top + 90.f}, active.textMuted,
+                 11.5f, FontWeight::Regular);
+        return;
+    }
+
+    float y = side.top + 28.f;
+    for (size_t i = 0; i < markers.size(); ++i) {
+        const Rect row{side.left, y, side.right, y + 34.f};
+        y += 38.f;
+        if (row.bottom > side.bottom - 44.f) break;
+
+        renderer.fillRounded(row, active.surface.fade(0.45f), active.radius);
+        gui.text(strings::formatDuration(markers[i].sessionSeconds),
+                 Rect{row.left + 10.f, row.top, row.left + 90.f, row.bottom}, active.liveAccent(),
+                 12.f, FontWeight::SemiBold);
+        gui.text(markers[i].server.empty() ? "Solo"
+                                           : Privacy::get().maskAddress(markers[i].server),
+                 Rect{row.left + 92.f, row.top, row.right - 8.f, row.bottom}, active.textMuted,
+                 11.f, FontWeight::Regular);
+    }
+
+    if (gui.button(UiId("clear_markers"),
+                   Rect{side.left, side.bottom - 38.f, side.right, side.bottom - 8.f},
+                   "Effacer les marqueurs")) {
+        Clips::get().clear();
+    }
 }
 
 void ClickGui::drawFooter(const Rect& rect) {
