@@ -23,6 +23,7 @@ target_link_libraries(Velyx PRIVATE
         dwrite
         windowscodecs
         version
+        winhttp
         winmm
         ws2_32
         shlwapi
