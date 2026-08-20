@@ -10,6 +10,7 @@
 
 #include "core/Strings.hpp"
 #include "dll/Velyx.hpp"
+#include "dll/feature/Clips.hpp"
 #include "dll/feature/Playtime.hpp"
 #include "dll/feature/Screenshot.hpp"
 #include "dll/feature/Services.hpp"
@@ -762,6 +763,55 @@ private:
     }
 };
 
+
+class ClipMarkers final : public Module {
+public:
+    ClipMarkers()
+        : Module("clip_markers", "Marqueurs", ModuleCategory::Utility,
+                 "Pose un repère horodaté pour retrouver un moment dans un enregistrement.") {
+        mutablePermissions().files = true;
+
+        settings.keybind("markKey", "Poser un marqueur",
+                         Keybind{VK_F8, false, false, false, Keybind::Mode::Once});
+        settings.toggle("notify", "Confirmer par une notification", true);
+        settings.toggle("countInSession", "Afficher le total de la session", true);
+
+        always(&ClipMarkers::onKey);
+        addKeywords({"marqueur", "clip", "repère", "moment"});
+    }
+
+    void onEnable() override { mark(); }
+
+private:
+    void onKey(KeyEvent& event) {
+        if (!event.down || event.repeat) return;
+
+        const Keybind bind = settings.value<Keybind>("markKey", Keybind{});
+        if (!bind.bound() || event.key != bind.key) return;
+        if (bind.ctrl != event.ctrl || bind.shift != event.shift || bind.alt != event.alt) return;
+
+        mark();
+    }
+
+    void mark() {
+        const ClipMarker marker = Clips::get().mark();
+        ++thisSession_;
+
+        if (!settings.value<bool>("notify", true)) return;
+
+        const std::string body =
+            settings.value<bool>("countInSession", true)
+                ? std::format("{} depuis le début de la session", thisSession_)
+                : std::string{};
+
+        Notifications::success(std::format("Marqueur à {}",
+                                           strings::formatDuration(marker.sessionSeconds)),
+                               body);
+    }
+
+    int thisSession_ = 0;
+};
+
 } // namespace
 
 void registerClientModules(ModuleManager& manager) {
@@ -776,6 +826,7 @@ void registerClientModules(ModuleManager& manager) {
     manager.add<PlaytimeHud>();
     manager.add<CustomHitColor>();
     manager.add<CustomDamageTint>();
+    manager.add<ClipMarkers>();
 }
 
 } // namespace velyx
