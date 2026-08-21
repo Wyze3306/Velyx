@@ -32,11 +32,6 @@ cmake -B "$BUILD_DIR" -G Ninja \
 
 cmake --build "$BUILD_DIR" -j"$(nproc)"
 
-# The DLL looks for its assets next to itself.
-mkdir -p "$BUILD_DIR/bin/assets"
-cp -r assets/* "$BUILD_DIR/bin/assets/" 2>/dev/null || true
-
 echo
-echo "  $BUILD_DIR/bin/Velyx.dll   client"
-echo "  $BUILD_DIR/bin/Velyx.exe   launcher"
+echo "  $BUILD_DIR/bin/Velyx.exe   everything, in one file"
 echo

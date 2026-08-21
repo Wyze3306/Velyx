@@ -10,10 +10,10 @@ The point is that a Mojang update needs a new file here, not a rebuild.
 
 In this order, and the three sources merge with the last one winning:
 
-1. `<folder containing Velyx.dll>/assets/signatures/<major.minor>.json`, the pack
-   shipped with a build;
-2. `%APPDATA%/Velyx/assets/signatures/<major.minor>.json`, a pack the user
-   dropped in;
+1. `<folder containing Velyx.dll>/assets/signatures/<major.minor>.json`, which
+   is where a development build keeps its pack;
+2. `%APPDATA%/Velyx/assets/signatures/<major.minor>.json`, where the launcher
+   unpacks the template and where a pack you download goes;
 3. `%APPDATA%/Velyx/config/signatures.json`, local overrides, handy for fixing a
    single entry without rewriting the pack.
 

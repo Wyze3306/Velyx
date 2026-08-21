@@ -19,12 +19,8 @@ if errorlevel 1 goto :error
 cmake --build build --config %BUILD_TYPE% --parallel
 if errorlevel 1 goto :error
 
-if not exist "build\bin\%BUILD_TYPE%\assets" mkdir "build\bin\%BUILD_TYPE%\assets"
-xcopy /E /I /Y assets "build\bin\%BUILD_TYPE%\assets" >nul
-
 echo.
-echo   build\bin\%BUILD_TYPE%\Velyx.dll  client
-echo   build\bin\%BUILD_TYPE%\Velyx.exe  launcher
+echo   build\bin\%BUILD_TYPE%\Velyx.exe  everything, in one file
 echo.
 goto :eof
 

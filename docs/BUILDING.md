@@ -23,17 +23,21 @@ Visual Studio 2022 or newer, with the C++ desktop workload.
 
 ## Output
 
-| File | Role |
+One file: `build/bin/Velyx.exe`.
+
+The launcher links the client DLL, the interface fonts and the signature
+templates in as resources and unpacks them under `%APPDATA%\Velyx` the first
+time it runs, so there is nothing to copy next to the executable and nothing to
+download. MinHook and nlohmann/json live in `external/`.
+
+| Unpacked to | Contents |
 | --- | --- |
-| `Velyx.dll` | the client, injected into `Minecraft.Windows.exe` |
-| `Velyx.exe` | the launcher |
-| `assets/` | fonts, themes, signature packs |
+| `%APPDATA%\Velyx\bin\Velyx.dll` | the client, injected into `Minecraft.Windows.exe` |
+| `%APPDATA%\Velyx\assets\fonts` | Space Grotesk and JetBrains Mono (SIL Open Font License) |
+| `%APPDATA%\Velyx\assets\signatures` | the signature pack template and its notes |
 
-There is nothing to download. MinHook and nlohmann/json live in `external/`.
-
-`assets/fonts` carries Space Grotesk and JetBrains Mono (SIL Open Font License).
-Both binaries load them from `assets/fonts` next to the executable, so the folder
-has to travel with a build; without it the interface falls back to Segoe UI.
+A file already there with the same size is left alone, so replacing the
+executable refreshes the payload without touching anything you edited.
 
 ## Options
 

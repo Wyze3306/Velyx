@@ -11,6 +11,10 @@ that runs several game instances side by side, each on its own Microsoft account
 
 </div>
 
+Velyx ships as a single `Velyx.exe`. The client, the fonts and the signature
+template travel inside it and land in `%APPDATA%\Velyx` the first time you run
+it, so there is no folder to keep together and nothing to install.
+
 ## What it does
 
 **In game.** One menu with fuzzy search over every module and every setting, a
