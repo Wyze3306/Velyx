@@ -71,6 +71,7 @@ private:
     bool createDeviceResources(IDXGISwapChain* swapChain);
     bool createTargets(IDXGISwapChain* swapChain);
     void markDeviceLostLocked(std::string_view reason, Sync sync);
+    void releaseInterop();
     bool createD2D(IUnknown* deviceForD2D);
 
     std::recursive_mutex mutex_;

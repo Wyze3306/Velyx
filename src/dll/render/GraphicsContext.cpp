@@ -65,10 +65,29 @@ void GraphicsContext::markDeviceLostLocked(std::string_view reason, Sync sync) {
     releaseTargets(sync);
     Log::info(kLog, "release: targets gone");
 
+    // Before the devices go: the renderer's brushes and effects were made by the very
+    // context about to be destroyed, and the layouts by the factory behind it.
     DeviceLostEvent event;
     events().emit(event);
 
-    Log::info(kLog, "release: done");
+    releaseInterop();
+    Log::info(kLog, "release: done, interop devices gone");
+}
+
+// The 11on12 device and the D2D device on top of it are built on the game's own
+// device and command queue. Holding them while vkd3d-proton recreates the swapchain
+// from its present task is what ends the process: with the buffers already handed
+// back, no queue work left to do and nothing being drawn, this is the last thing of
+// ours still standing when it dies. So it goes now, inside the same Present call,
+// rather than at the rebuild the game never lives to see.
+void GraphicsContext::releaseInterop() {
+    d2dContext_.reset();
+    d2dDevice_.reset();
+    device11On12_.reset();
+    context11_.reset();
+    device11_.reset();
+    swapChain3_.reset();
+    swapChain_ = nullptr;
 }
 
 // How long the window has to hold still before the overlay trusts its size again.
