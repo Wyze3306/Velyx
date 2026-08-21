@@ -19,6 +19,4 @@ compile_commands.json
 assets/signatures/*.json
 !assets/signatures/template.json
 
-# Seeded design canvas, rebuilt from design/*.dc.html
-design/velyx-interface.html
 dist/
