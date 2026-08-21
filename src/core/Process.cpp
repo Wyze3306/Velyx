@@ -1,6 +1,7 @@
 #include "Process.hpp"
 
 #include <windows.h>
+#include <winternl.h>
 #include <tlhelp32.h>
 #include <psapi.h>
 #include <aclapi.h>
@@ -26,6 +27,46 @@ struct HandleGuard {
     HandleGuard& operator=(const HandleGuard&) = delete;
     [[nodiscard]] bool valid() const { return handle && handle != INVALID_HANDLE_VALUE; }
 };
+
+// Wine leaves the snapshot name empty for a process the GDK loader started, which
+// is how Minecraft comes up on that stack. The process's own PEB still carries the
+// image path, so read it from there when the snapshot has nothing to offer.
+std::filesystem::path imagePathFromPeb(uint32_t pid) {
+    using NtQueryInformationProcessFn =
+        NTSTATUS(WINAPI*)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
+
+    static const auto query = reinterpret_cast<NtQueryInformationProcessFn>(
+        reinterpret_cast<void*>(
+            GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess")));
+    if (!query) return {};
+
+    const HandleGuard process(
+        OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid));
+    if (!process.valid()) return {};
+
+    PROCESS_BASIC_INFORMATION basic{};
+    ULONG written = 0;
+    if (query(process.handle, ProcessBasicInformation, &basic, sizeof(basic), &written)) {
+        return {};
+    }
+
+    PEB peb{};
+    RTL_USER_PROCESS_PARAMETERS parameters{};
+    if (!ReadProcessMemory(process.handle, basic.PebBaseAddress, &peb, sizeof(peb), nullptr) ||
+        !ReadProcessMemory(process.handle, peb.ProcessParameters, &parameters,
+                           sizeof(parameters), nullptr)) {
+        return {};
+    }
+
+    std::wstring image(parameters.ImagePathName.Length / sizeof(wchar_t), L'\0');
+    if (image.empty() ||
+        !ReadProcessMemory(process.handle, parameters.ImagePathName.Buffer, image.data(),
+                           image.size() * sizeof(wchar_t), nullptr)) {
+        return {};
+    }
+
+    return std::filesystem::path(image);
+}
 
 std::string lastErrorMessage(DWORD code) {
     LPSTR buffer = nullptr;
@@ -58,6 +99,12 @@ std::vector<ProcessInfo> Process::enumerate() {
         ProcessInfo info;
         info.pid = entry.th32ProcessID;
         info.name = strings::toUtf8(entry.szExeFile);
+
+        if (info.name.empty()) {
+            info.executable = imagePathFromPeb(info.pid);
+            info.name = info.executable.filename().string();
+        }
+
         processes.push_back(std::move(info));
     } while (Process32NextW(snapshot.handle, &entry));
 

@@ -136,6 +136,23 @@ std::optional<PackageIdentity> queryPackage(const std::string& packageName) {
     return identity;
 }
 
+// ActivateApplication is free to report no pid at all, and the id it does hand back
+// can belong to a starter process that is already gone by the time the game window
+// is up. Whichever it is, the instance is the Minecraft process that was not there
+// a moment ago.
+uint32_t waitForGame(const std::vector<uint32_t>& before, int timeoutMs) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+
+    for (;;) {
+        for (const ProcessInfo& process : Process::findByName(kGameExecutable)) {
+            if (std::ranges::find(before, process.pid) == before.end()) return process.pid;
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) return 0;
+        Sleep(150);
+    }
+}
+
 std::string activationHint(HRESULT hr) {
     switch (static_cast<unsigned long>(hr)) {
         case 0x80270254UL:  // E_APPLICATION_NOT_REGISTERED
@@ -643,6 +660,11 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
 
     save();
 
+    std::vector<uint32_t> alreadyRunning;
+    for (const ProcessInfo& process : Process::findByName(kGameExecutable)) {
+        alreadyRunning.push_back(process.pid);
+    }
+
     {
         const ComApartment apartment;
 
@@ -675,6 +697,14 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
         }
 
         instance.pid = pid;
+    }
+
+    if (instance.pid == 0 || !Process::isRunning(instance.pid)) {
+        instance.pid = waitForGame(alreadyRunning, 30000);
+    }
+
+    if (instance.pid == 0) {
+        return fail("le jeu a été activé mais son processus reste introuvable");
     }
 
     instance.lastPlayedMs = nowMs();
