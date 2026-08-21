@@ -1,9 +1,11 @@
 #include "InstanceManager.hpp"
 
 #include <windows.h>
+#include <objbase.h>
 #include <shobjidl.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <format>
 #include <fstream>
@@ -79,6 +81,77 @@ int runPowerShell(const std::wstring& command, std::string* output) {
 
 std::filesystem::path storeFile() { return Paths::instances() / kStoreFile; }
 
+// An apartment belongs to a thread, not to a process, and the launcher runs its long
+// operations on a worker, so anything reaching for COM has to open its own.
+class ComApartment {
+public:
+    ComApartment() {
+        const HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        owned_ = SUCCEEDED(hr);
+        ready_ = owned_ || hr == RPC_E_CHANGED_MODE;
+    }
+
+    ~ComApartment() {
+        if (owned_) CoUninitialize();
+    }
+
+    ComApartment(const ComApartment&) = delete;
+    ComApartment& operator=(const ComApartment&) = delete;
+
+    [[nodiscard]] bool ready() const { return ready_; }
+
+private:
+    bool owned_ = false;
+    bool ready_ = false;
+};
+
+std::string packageNameFor(const Instance& instance) { return "Velyx." + instance.id; }
+
+struct PackageIdentity {
+    std::string familyName;
+    std::string applicationId;
+};
+
+// Windows is the only authority on what an instance is called once it is registered:
+// asking it keeps the stored identity from drifting out of the activation string.
+std::optional<PackageIdentity> queryPackage(const std::string& packageName) {
+    std::string output;
+    const std::wstring command =
+        L"$p = @(Get-AppxPackage -Name '" + strings::toUtf16(packageName) +
+        L"')[0]; if ($p) { $a = @((Get-AppxPackageManifest -Package $p.PackageFullName)"
+        L".Package.Applications.Application)[0]; $p.PackageFamilyName + '|' + $a.Id }";
+
+    if (runPowerShell(command, &output) != 0) return std::nullopt;
+
+    const std::string reply(strings::trim(output));
+    const size_t separator = reply.find('|');
+    if (separator == std::string::npos) return std::nullopt;
+
+    PackageIdentity identity;
+    identity.familyName = std::string(strings::trim(std::string_view(reply).substr(0, separator)));
+    identity.applicationId =
+        std::string(strings::trim(std::string_view(reply).substr(separator + 1)));
+
+    if (identity.familyName.empty() || identity.applicationId.empty()) return std::nullopt;
+    return identity;
+}
+
+std::string activationHint(HRESULT hr) {
+    switch (static_cast<unsigned long>(hr)) {
+        case 0x80270254UL:  // E_APPLICATION_NOT_REGISTERED
+            return "Windows ne connaît pas ce paquet. Réinstallez l'instance et vérifiez "
+                   "que le mode développeur est toujours actif.";
+        case 0x8027025AUL:  // E_APPLICATION_ACTIVATION_TIMED_OUT
+            return "Le jeu a mis trop de temps à démarrer.";
+        case 0x80070005UL:  // E_ACCESSDENIED
+            return "Windows a refusé l'activation. Lancez Velyx sans les droits "
+                   "administrateur : un processus élevé ne peut pas démarrer une application "
+                   "du Store.";
+        default:
+            return {};
+    }
+}
+
 std::string slugify(std::string_view name) {
     std::string slug;
     slug.reserve(name.size());
@@ -98,7 +171,18 @@ std::string slugify(std::string_view name) {
 
 bool replaceAttribute(std::string& xml, std::string_view tag, std::string_view attribute,
                       std::string_view value) {
-    const size_t tagStart = xml.find(std::string("<") + std::string(tag));
+    const std::string open = std::string("<") + std::string(tag);
+
+    // "<Application" is also a prefix of "<Applications", so the name has to end here.
+    size_t tagStart = std::string::npos;
+    for (size_t at = xml.find(open); at != std::string::npos; at = xml.find(open, at + 1)) {
+        const char next = xml[at + open.size()];
+        if (next == '>' || next == '/' || std::isspace(static_cast<unsigned char>(next))) {
+            tagStart = at;
+            break;
+        }
+    }
+
     if (tagStart == std::string::npos) return false;
 
     const size_t tagEnd = xml.find('>', tagStart);
@@ -509,13 +593,10 @@ bool InstanceManager::registerInstance(Instance& instance, std::string* error) {
         }
     }
 
-    std::string details;
-    runPowerShell(L"(Get-AppxPackage -Name 'Velyx." + strings::toUtf16(instance.id) +
-                      L"').PackageFamilyName",
-                  &details);
-
-    const auto trimmed = std::string(strings::trim(details));
-    if (!trimmed.empty()) instance.packageFamilyName = trimmed;
+    if (const auto identity = queryPackage(packageNameFor(instance))) {
+        instance.packageFamilyName = identity->familyName;
+        instance.applicationId = identity->applicationId;
+    }
 
     instance.registered = true;
     Log::info(kLog, "registered instance '{}' ({})", instance.name, instance.packageFamilyName);
@@ -524,8 +605,9 @@ bool InstanceManager::registerInstance(Instance& instance, std::string* error) {
 
 bool InstanceManager::unregisterInstance(Instance& instance, std::string* error) {
     std::string output;
-    const std::wstring command = L"Get-AppxPackage -Name 'Velyx." +
-                                 strings::toUtf16(instance.id) + L"' | Remove-AppxPackage";
+    const std::wstring command = L"Get-AppxPackage -Name '" +
+                                 strings::toUtf16(packageNameFor(instance)) +
+                                 L"' | Remove-AppxPackage";
 
     if (runPowerShell(command, &output) != 0) {
         if (error) *error = "Remove-AppxPackage a échoué : " + std::string(strings::trim(output));
@@ -543,21 +625,43 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
         return false;
     };
 
-    if (!instance.registered && !registerInstance(instance, error)) return false;
-
     if (instance.running() && Process::isRunning(instance.pid)) {
         return fail("cette instance est déjà lancée");
     }
 
+    // A registration is per user and Windows drops it on its own — when the payload moves,
+    // when developer mode goes off, sometimes across a major update — so the stored flag
+    // only tells us what we did last time, never what the system still holds.
+    if (const auto identity = queryPackage(packageNameFor(instance))) {
+        instance.packageFamilyName = identity->familyName;
+        instance.applicationId = identity->applicationId;
+        instance.registered = true;
+    } else {
+        instance.registered = false;
+        if (!registerInstance(instance, error)) return false;
+    }
+
+    save();
+
     {
+        const ComApartment apartment;
+
         IApplicationActivationManager* manager = nullptr;
-        HRESULT hr = CoCreateInstance(CLSID_ApplicationActivationManager, nullptr,
-                                      CLSCTX_LOCAL_SERVER,
-                                      __uuidof(IApplicationActivationManager),
-                                      reinterpret_cast<void**>(&manager));
-        if (FAILED(hr) || !manager) {
-            return fail("ApplicationActivationManager indisponible");
+        HRESULT hr = E_FAIL;
+        if (apartment.ready()) {
+            hr = CoCreateInstance(CLSID_ApplicationActivationManager, nullptr,
+                                  CLSCTX_LOCAL_SERVER,
+                                  __uuidof(IApplicationActivationManager),
+                                  reinterpret_cast<void**>(&manager));
         }
+
+        if (FAILED(hr) || !manager) {
+            return fail(std::format("ApplicationActivationManager indisponible (0x{:08X})",
+                                    static_cast<unsigned>(hr)));
+        }
+
+        // Without this the game starts behind the launcher.
+        CoAllowSetForegroundWindow(manager, nullptr);
 
         DWORD pid = 0;
         const std::wstring appId = strings::toUtf16(instance.activationId());
@@ -565,8 +669,9 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
         manager->Release();
 
         if (FAILED(hr)) {
-            return fail(std::format("ActivateApplication failed (0x{:08X})",
-                                    static_cast<unsigned>(hr)));
+            const std::string hint = activationHint(hr);
+            return fail(std::format("ActivateApplication a échoué (0x{:08X}){}{}",
+                                    static_cast<unsigned>(hr), hint.empty() ? "" : " : ", hint));
         }
 
         instance.pid = pid;
