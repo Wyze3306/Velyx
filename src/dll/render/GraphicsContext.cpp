@@ -197,13 +197,18 @@ bool GraphicsContext::attach(IDXGISwapChain* swapChain) {
                                   reinterpret_cast<void**>(swapChain3_.put()));
         window_ = desc.OutputWindow;
     } else {
-        // A different device, or none yet: everything has to go.
-        if (swapChain_ != nullptr || deviceLost_) {
-            Log::info(kLog, "rebuild: dropping the interop devices");
+        // A different device, or none yet: whatever is left has to go. Usually nothing
+        // is — a resize already released the interop where it had to be released. And
+        // shutting down again would take the game's command queue with it, which the
+        // hook only hands back on the next frame: the rebuild would then fail for want
+        // of it, drop it again on the next attempt, and never come back.
+        if (d2dContext_ || device11_ || device11On12_) {
+            Log::info(kLog, "rebuild: dropping what is left of the interop devices");
             shutdown();
-            deviceLost_ = false;
             Log::info(kLog, "rebuild: interop devices dropped");
         }
+
+        deviceLost_ = false;
 
         swapChain_ = swapChain;
         if (!createDeviceResources(swapChain)) return false;
@@ -321,7 +326,7 @@ bool GraphicsContext::createDeviceResources(IDXGISwapChain* swapChain) {
         if (!commandQueue_) {
 
             if (!warnedNoQueue_) {
-                Log::debug(kLog, "waiting for the game's D3D12 command queue");
+                Log::info(kLog, "rebuild: waiting for the game's D3D12 command queue");
                 warnedNoQueue_ = true;
             }
             return false;
