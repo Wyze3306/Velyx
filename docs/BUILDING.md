@@ -31,6 +31,10 @@ Visual Studio 2022 or newer, with the C++ desktop workload.
 
 There is nothing to download. MinHook and nlohmann/json live in `external/`.
 
+`assets/fonts` carries Space Grotesk and JetBrains Mono (SIL Open Font License).
+Both binaries load them from `assets/fonts` next to the executable, so the folder
+has to travel with a build; without it the interface falls back to Segoe UI.
+
 ## Options
 
 | Option | Default | Effect |

@@ -1,7 +1,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <d2d1.h>
-#include <dwrite.h>
+#include <dwrite_3.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 
@@ -48,6 +48,8 @@ const Color kDanger = palette::kEmber;
 
 ID2D1Factory* g_d2dFactory = nullptr;
 IDWriteFactory* g_dwriteFactory = nullptr;
+IDWriteFactory5* g_dwrite5 = nullptr;
+IDWriteFontCollection1* g_bundledFonts = nullptr;
 ID2D1HwndRenderTarget* g_target = nullptr;
 ID2D1SolidColorBrush* g_brush = nullptr;
 IDWriteTextFormat* g_fontTitle = nullptr;
@@ -55,6 +57,8 @@ IDWriteTextFormat* g_fontBody = nullptr;
 IDWriteTextFormat* g_fontSmall = nullptr;
 IDWriteTextFormat* g_fontHeading = nullptr;
 IDWriteTextFormat* g_fontCentre = nullptr;
+IDWriteTextFormat* g_fontCentreLight = nullptr;
+IDWriteTextFormat* g_fontSmallRight = nullptr;
 
 HWND g_window = nullptr;
 
@@ -203,6 +207,53 @@ void write(std::wstring_view text, const Rect& rect, const Color& color, IDWrite
 
 void write(std::string_view text, const Rect& rect, const Color& color, IDWriteTextFormat* format) {
     write(strings::toUtf16(text), rect, color, format);
+}
+
+float measureText(std::string_view text, IDWriteTextFormat* format) {
+    if (!g_dwriteFactory || !format || text.empty()) return 0.f;
+
+    const std::wstring wide = strings::toUtf16(text);
+    IDWriteTextLayout* layout = nullptr;
+    if (FAILED(g_dwriteFactory->CreateTextLayout(wide.c_str(), static_cast<UINT32>(wide.size()),
+                                                 format, 2000.f, 60.f, &layout))) {
+        return 0.f;
+    }
+
+    DWRITE_TEXT_METRICS metrics{};
+    layout->GetMetrics(&metrics);
+    layout->Release();
+
+    return metrics.widthIncludingTrailingWhitespace;
+}
+
+void drawChevron(Vec2 centre, const Color& color) {
+    g_brush->SetColor(toD2D(color));
+    g_target->DrawLine(D2D1::Point2F(centre.x - 3.5f, centre.y - 1.5f),
+                       D2D1::Point2F(centre.x, centre.y + 2.f), g_brush, 1.4f);
+    g_target->DrawLine(D2D1::Point2F(centre.x, centre.y + 2.f),
+                       D2D1::Point2F(centre.x + 3.5f, centre.y - 1.5f), g_brush, 1.4f);
+}
+
+void drawPlayGlyph(Vec2 centre, const Color& color) {
+    ID2D1PathGeometry* path = nullptr;
+    if (FAILED(g_d2dFactory->CreatePathGeometry(&path))) return;
+
+    ID2D1GeometrySink* sink = nullptr;
+    if (FAILED(path->Open(&sink))) {
+        path->Release();
+        return;
+    }
+
+    sink->BeginFigure(D2D1::Point2F(centre.x - 4.f, centre.y - 5.5f), D2D1_FIGURE_BEGIN_FILLED);
+    sink->AddLine(D2D1::Point2F(centre.x + 5.f, centre.y));
+    sink->AddLine(D2D1::Point2F(centre.x - 4.f, centre.y + 5.5f));
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    sink->Close();
+    sink->Release();
+
+    g_brush->SetColor(toD2D(color));
+    g_target->FillGeometry(path, g_brush);
+    path->Release();
 }
 
 bool button(const Rect& rect, std::string_view label, bool primary = false, bool enabled = true) {
@@ -354,106 +405,137 @@ void drawInstanceRow(const Rect& rect, const Instance& instance, int index) {
     const bool selected = index == g_selected;
     const bool running = instance.running();
 
-    fill(rect, selected ? kSurfaceHover.fade(0.55f) : kPanel, 14.f);
-    stroke(rect, selected ? kBorder : kBorder.fade(0.6f), 14.f);
+    fill(rect, selected ? kSurfaceHover.fade(0.5f) : kPanel, 14.f);
+    stroke(rect, selected ? kBorder : kBorder.fade(0.55f), 14.f);
 
     static const Color kTints[4] = {palette::kMint, Color::rgb8(124, 140, 255), palette::kHoney,
                                     Color::rgb8(232, 112, 158)};
     const Color tint = kTints[index % 4];
 
-    const Rect avatar{rect.left + 16.f, rect.center().y - 20.f, rect.left + 56.f,
-                      rect.center().y + 20.f};
+    const Rect avatar{rect.left + 16.f, rect.center().y - 19.f, rect.left + 54.f,
+                      rect.center().y + 19.f};
     fill(avatar, tint.withAlpha(0.12f), 12.f);
-    stroke(avatar, tint.withAlpha(0.24f), 12.f);
+    stroke(avatar, tint.withAlpha(0.26f), 12.f);
     write(strings::toUpper(instance.name.substr(0, 1)), avatar, tint, g_fontCentre);
 
-    write(instance.name, Rect{rect.left + 70.f, rect.top + 15.f, rect.left + 262.f, rect.top + 39.f},
+    const Rect more{rect.right - 46.f, rect.center().y - 15.f, rect.right - 16.f,
+                    rect.center().y + 15.f};
+    const Rect action{more.left - 108.f, rect.center().y - 16.f, more.left - 10.f,
+                      rect.center().y + 16.f};
+
+    write(instance.name, Rect{rect.left + 68.f, rect.top + 15.f, rect.left + 300.f, rect.top + 39.f},
           kText, g_fontTitle);
 
     const Account* account = AccountStore::get().forInstance(instance.id);
     write(account ? account->label : "Aucun compte associé",
-          Rect{rect.left + 70.f, rect.top + 38.f, rect.left + 262.f, rect.bottom - 14.f}, kTextDim,
+          Rect{rect.left + 68.f, rect.top + 38.f, rect.left + 300.f, rect.bottom - 14.f}, kTextDim,
           g_fontSmall);
 
-    const Rect chip{rect.left + 272.f, rect.center().y - 15.f, rect.left + 382.f,
+    const std::string version = instance.gameVersion.empty() ? "inconnue" : instance.gameVersion;
+    const float chipWidth = std::max(96.f, measureText(version, g_fontSmall) + 44.f);
+    const Rect chip{rect.left + 312.f, rect.center().y - 15.f, rect.left + 312.f + chipWidth,
                     rect.center().y + 15.f};
+
     const bool menuOpen = g_menu == index;
     const bool chipHover = chip.contains(g_mouse) && !busy();
 
     fill(chip, menuOpen || chipHover ? kSurfaceHover : kSurface, 9.f);
-    stroke(chip, menuOpen ? kAccent.withAlpha(0.5f) : kBorder, 9.f);
-    write(instance.gameVersion.empty() ? "inconnue" : instance.gameVersion,
-          Rect{chip.left + 10.f, chip.top, chip.right - 10.f, chip.bottom}, kText, g_fontSmall);
+    stroke(chip, menuOpen ? kAccent.withAlpha(0.55f) : kBorder, 9.f);
+    write(version, Rect{chip.left + 12.f, chip.top, chip.right - 24.f, chip.bottom},
+          menuOpen || chipHover ? kText : kTextMuted, g_fontSmall);
+    drawChevron({chip.right - 14.f, chip.center().y}, kTextDim);
 
-    if (chipHover) g_hotWidget = ++g_nextWidget;
-    if (chipHover && g_clicked) {
-        g_selected = index;
-        g_rowMenu = -1;
-        g_menu = menuOpen ? -1 : index;
-        if (g_menu == index && g_versions.empty()) loadVersions();
+    if (chipHover) {
+        g_hotWidget = ++g_nextWidget;
+        if (g_clicked) {
+            g_selected = index;
+            g_rowMenu = -1;
+            g_menu = menuOpen ? -1 : index;
+            if (g_menu == index && g_versions.empty()) loadVersions();
+        }
     }
 
-    const Rect more{rect.left + 390.f, rect.center().y - 15.f, rect.left + 420.f,
-                    rect.center().y + 15.f};
+    std::string state = "Prête";
+    Color stateColor = kTextMuted;
+    if (running) {
+        state = "En cours";
+        stateColor = kAccent;
+    } else if (!instance.registered) {
+        state = "Non enregistrée";
+        stateColor = palette::kHoney;
+    }
+
+    const float stateWidth = measureText(state, g_fontSmallRight);
+    const float stateRight = action.left - 18.f;
+
+    write(state, Rect{stateRight - stateWidth - 4.f, rect.top, stateRight, rect.bottom}, stateColor,
+          g_fontSmallRight);
+    fill(Rect::fromSize(stateRight - stateWidth - 18.f, rect.center().y - 3.5f, 7.f, 7.f),
+         running ? kAccent : stateColor.fade(0.55f), 3.5f);
+
+    if (running) {
+        const bool stopHover = action.contains(g_mouse) && !busy();
+        fill(action, stopHover ? kSurfaceHover : Color{}, 9.f);
+        stroke(action, kBorder, 9.f);
+        fill(Rect::fromSize(action.left + 16.f, action.center().y - 5.f, 10.f, 10.f),
+             stopHover ? kText : kTextMuted, 2.f);
+        write("Arrêter", Rect{action.left + 34.f, action.top, action.right - 10.f, action.bottom},
+              stopHover ? kText : kTextMuted, g_fontSmall);
+
+        if (stopHover) {
+            g_hotWidget = ++g_nextWidget;
+            if (g_clicked) {
+                Process::terminate(instance.pid);
+                setStatus("« " + instance.name + " » arrêtée.");
+                refreshSnapshot();
+            }
+        }
+    } else {
+        const bool playHover = action.contains(g_mouse) && !busy();
+        const Color background = playHover ? kAccent.lighten(0.06f) : kAccent;
+        const Color foreground = background.readableForeground();
+
+        fill(action, busy() ? background.fade(0.35f) : background, 9.f);
+        drawPlayGlyph({action.left + 22.f, action.center().y},
+                      busy() ? foreground.fade(0.4f) : foreground);
+        write("Jouer", Rect{action.left + 36.f, action.top, action.right - 12.f, action.bottom},
+              busy() ? foreground.fade(0.4f) : foreground, g_fontBody);
+
+        if (playHover) {
+            g_hotWidget = ++g_nextWidget;
+            if (g_clicked) {
+                g_selected = index;
+                launchInstance(instance.id, instance.name);
+            }
+        }
+    }
+
     const bool moreHover = more.contains(g_mouse) && !busy();
     if (moreHover || g_rowMenu == index) fill(more, kSurfaceHover, 9.f);
     for (int d = 0; d < 3; ++d) {
-        fill(Rect::fromSize(more.center().x - 6.f + static_cast<float>(d) * 5.f,
+        fill(Rect::fromSize(more.center().x - 7.f + static_cast<float>(d) * 6.f,
                             more.center().y - 1.5f, 3.f, 3.f),
              moreHover ? kText : kTextMuted, 1.5f);
     }
-    if (moreHover) g_hotWidget = ++g_nextWidget;
-    if (moreHover && g_clicked) {
-        g_selected = index;
-        g_menu = -1;
-        g_rowMenu = g_rowMenu == index ? -1 : index;
-    }
-
-    const Vec2 dot{rect.left + 440.f, rect.center().y};
-    fill(Rect::fromSize(dot.x - 3.f, dot.y - 3.f, 6.f, 6.f),
-         running ? kAccent : Color::rgb8(58, 64, 72), 3.f);
-
-    std::string state = "Prête";
-    if (running) {
-        state = "En cours · pid " + std::to_string(instance.pid);
-    } else if (!instance.registered) {
-        state = "Non enregistrée";
-    }
-    write(state, Rect{rect.left + 454.f, rect.top, rect.left + 660.f, rect.bottom},
-          running ? kAccent : kTextMuted, g_fontSmall);
-
-    if (running) {
-        const Rect stop{rect.right - 52.f, rect.center().y - 16.f, rect.right - 16.f,
-                        rect.center().y + 16.f};
-        const bool stopHover = stop.contains(g_mouse) && !busy();
-        fill(stop, stopHover ? kSurfaceHover : Color{}, 9.f);
-        stroke(stop, kBorder, 9.f);
-        fill(Rect::fromSize(stop.center().x - 5.f, stop.center().y - 5.f, 10.f, 10.f),
-             stopHover ? kText : kTextMuted, 2.f);
-
-        if (stopHover) g_hotWidget = ++g_nextWidget;
-        if (stopHover && g_clicked) {
-            Process::terminate(instance.pid);
-            setStatus("« " + instance.name + " » arrêtée.");
-            refreshSnapshot();
-        }
-    } else {
-        const Rect play{rect.right - 116.f, rect.center().y - 16.f, rect.right - 16.f,
-                        rect.center().y + 16.f};
-        if (button(play, "Jouer", true, !busy())) {
+    if (moreHover) {
+        g_hotWidget = ++g_nextWidget;
+        if (g_clicked) {
             g_selected = index;
-            launchInstance(instance.id, instance.name);
+            g_menu = -1;
+            g_rowMenu = g_rowMenu == index ? -1 : index;
         }
     }
 
-    if (hovered && g_clicked && !chipHover && !moreHover) g_selected = index;
+    if (hovered && g_clicked && !chipHover && !moreHover && !action.contains(g_mouse)) {
+        g_selected = index;
+    }
 }
 
 void drawRowMenu(const Rect& rowRect, int index) {
     if (g_rowMenu != index || index >= static_cast<int>(g_instances.size())) return;
 
     const Instance& instance = g_instances[static_cast<size_t>(index)];
-    const Rect menu{rowRect.left + 390.f, rowRect.center().y + 18.f, rowRect.left + 600.f,
+    const Rect menu{rowRect.right - 226.f, rowRect.center().y + 18.f, rowRect.right - 16.f,
                     rowRect.center().y + 120.f};
 
     fill(menu.translated({0.f, 4.f}), Color::rgb8(0, 0, 0, 80), 12.f);
@@ -498,7 +580,7 @@ void drawVersionMenu(const Rect& rowRect, int index) {
     const Instance& instance = g_instances[static_cast<size_t>(index)];
 
     const float rows = static_cast<float>(std::max<size_t>(g_versions.size(), 1));
-    const Rect menu{rowRect.left + 272.f, rowRect.center().y + 18.f, rowRect.left + 480.f,
+    const Rect menu{rowRect.left + 312.f, rowRect.center().y + 18.f, rowRect.left + 520.f,
                     rowRect.center().y + 18.f + 30.f + rows * 30.f + 40.f};
 
     fill(menu.translated({0.f, 4.f}), Color::rgb8(0, 0, 0, 80), 12.f);
@@ -566,24 +648,32 @@ void drawVersionMenu(const Rect& rowRect, int index) {
 }
 
 void drawEmptyState(const Rect& rect) {
-    const Vec2 centre{rect.center().x, rect.center().y - 40.f};
+    fill(rect, kPanel.fade(0.45f), 14.f);
+    stroke(rect, kBorder.fade(0.5f), 14.f);
 
-    const Rect badge = Rect::fromSize(centre.x - 26.f, centre.y - 26.f, 52.f, 52.f);
-    fill(badge, kAccent.withAlpha(0.10f), 16.f);
-    stroke(badge, kAccent.withAlpha(0.22f), 16.f);
+    const float blockHeight = 172.f;
+    const float top = rect.top + std::max(24.f, (rect.height() - blockHeight) * 0.42f);
+    const Vec2 centre{rect.center().x, top + 26.f};
+
+    const Rect badge = Rect::fromSize(centre.x - 26.f, top, 52.f, 52.f);
+    fill(badge, kAccent.withAlpha(0.10f), 15.f);
+    stroke(badge, kAccent.withAlpha(0.22f), 15.f);
 
     g_brush->SetColor(toD2D(kAccent));
-    g_target->DrawLine(D2D1::Point2F(centre.x - 9.f, centre.y - 9.f),
+    g_target->DrawLine(D2D1::Point2F(centre.x - 9.f, centre.y - 8.f),
                        D2D1::Point2F(centre.x, centre.y + 9.f), g_brush, 2.6f);
     g_target->DrawLine(D2D1::Point2F(centre.x, centre.y + 9.f),
-                       D2D1::Point2F(centre.x + 9.f, centre.y - 9.f), g_brush, 2.6f);
+                       D2D1::Point2F(centre.x + 9.f, centre.y - 8.f), g_brush, 2.6f);
 
     write("Aucune instance pour l'instant",
-          Rect{rect.left, centre.y + 44.f, rect.right, centre.y + 72.f}, kText, g_fontCentre);
+          Rect{rect.left, top + 66.f, rect.right, top + 92.f}, kText, g_fontCentre);
 
-    write("Velyx copie le jeu installé par liens durs et lui donne une identité de paquet\n"
-          "distincte. Windows accepte alors de lancer plusieurs copies en même temps.",
-          Rect{rect.left, centre.y + 76.f, rect.right, centre.y + 124.f}, kTextDim, g_fontCentre);
+    write("Velyx copie le jeu installé par liens durs et lui donne",
+          Rect{rect.left, top + 96.f, rect.right, top + 118.f}, kTextDim, g_fontCentreLight);
+    write("une identité de paquet distincte. Windows accepte alors",
+          Rect{rect.left, top + 116.f, rect.right, top + 138.f}, kTextDim, g_fontCentreLight);
+    write("de lancer plusieurs copies en même temps.",
+          Rect{rect.left, top + 136.f, rect.right, top + 158.f}, kTextDim, g_fontCentreLight);
 }
 
 void drawBusyOverlay(const Rect& client) {
@@ -687,20 +777,25 @@ void render(const Rect& client) {
         createInstance();
     }
 
-    Rect list{client.left + 24.f, header.bottom + 14.f, client.right - 24.f, client.bottom - 56.f};
+    fill(Rect{client.left + 24.f, header.bottom + 6.f, client.right - 24.f, header.bottom + 7.f},
+         kBorder.fade(0.5f));
+
+    Rect list{client.left + 24.f, header.bottom + 20.f, client.right - 24.f, client.bottom - 56.f};
 
     if (!g_devMode) {
-        const Rect banner{list.left, list.top, list.right, list.top + 52.f};
+        const Rect banner{list.left, list.top, list.right, list.top + 58.f};
         list = Rect{list.left, banner.bottom + 12.f, list.right, list.bottom};
 
-        fill(banner, kDanger.withAlpha(0.10f), 12.f);
-        stroke(banner, kDanger.withAlpha(0.24f), 12.f);
+        fill(banner, kDanger.withAlpha(0.09f), 12.f);
+        stroke(banner, kDanger.withAlpha(0.22f), 12.f);
+        fill(Rect{banner.left + 1.f, banner.top + 12.f, banner.left + 3.f, banner.bottom - 12.f},
+             kDanger, 1.f);
         write("Le mode développeur de Windows est désactivé",
-              Rect{banner.left + 16.f, banner.top + 8.f, banner.right - 16.f, banner.top + 28.f},
+              Rect{banner.left + 18.f, banner.top + 10.f, banner.right - 16.f, banner.top + 30.f},
               kDanger, g_fontBody);
         write("Paramètres > Confidentialité et sécurité > Espace développeurs. Sans lui, Windows "
               "refuse d'enregistrer une instance.",
-              Rect{banner.left + 16.f, banner.top + 26.f, banner.right - 16.f, banner.bottom - 6.f},
+              Rect{banner.left + 18.f, banner.top + 30.f, banner.right - 16.f, banner.bottom - 8.f},
               kTextMuted, g_fontSmall);
     }
 
@@ -733,12 +828,57 @@ void render(const Rect& client) {
     drawBusyOverlay(client);
 }
 
+std::filesystem::path fontDirectory() {
+    wchar_t buffer[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+    return std::filesystem::path(buffer).parent_path() / "assets" / "fonts";
+}
+
+void loadBundledFonts() {
+    if (!g_dwriteFactory) return;
+    if (FAILED(g_dwriteFactory->QueryInterface(__uuidof(IDWriteFactory5),
+                                               reinterpret_cast<void**>(&g_dwrite5)))) {
+        Log::warn(kLog, "IDWriteFactory5 unavailable, falling back to system fonts");
+        return;
+    }
+
+    IDWriteFontSetBuilder1* builder = nullptr;
+    if (FAILED(g_dwrite5->CreateFontSetBuilder(&builder))) return;
+
+    int loaded = 0;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(fontDirectory(), ec)) {
+        if (!entry.is_regular_file(ec)) continue;
+
+        const auto extension = strings::toLower(entry.path().extension().string());
+        if (extension != ".ttf" && extension != ".otf") continue;
+
+        IDWriteFontFile* file = nullptr;
+        if (FAILED(g_dwrite5->CreateFontFileReference(entry.path().wstring().c_str(), nullptr,
+                                                      &file))) {
+            continue;
+        }
+        if (SUCCEEDED(builder->AddFontFile(file))) ++loaded;
+        file->Release();
+    }
+
+    IDWriteFontSet* set = nullptr;
+    if (loaded > 0 && SUCCEEDED(builder->CreateFontSet(&set))) {
+        g_dwrite5->CreateFontCollectionFromFontSet(set, &g_bundledFonts);
+        set->Release();
+    }
+    builder->Release();
+
+    Log::info(kLog, "{} bundled font file(s) loaded from {}", loaded,
+              fontDirectory().string());
+}
+
 IDWriteTextFormat* makeFormat(float size, DWRITE_FONT_WEIGHT weight,
                               DWRITE_PARAGRAPH_ALIGNMENT paragraph = DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
                               DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING) {
 
     IDWriteTextFormat* format = nullptr;
-    if (FAILED(g_dwriteFactory->CreateTextFormat(L"Space Grotesk", nullptr, weight,
+    if (FAILED(g_dwriteFactory->CreateTextFormat(L"Space Grotesk", g_bundledFonts, weight,
                                                  DWRITE_FONT_STYLE_NORMAL,
                                                  DWRITE_FONT_STRETCH_NORMAL, size, L"", &format)) &&
         FAILED(g_dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr, weight,
@@ -773,14 +913,21 @@ bool createGraphics(HWND window) {
 
     g_target->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &g_brush);
 
+    loadBundledFonts();
+
     g_fontHeading = makeFormat(21.f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     g_fontTitle = makeFormat(14.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     g_fontBody = makeFormat(13.f, DWRITE_FONT_WEIGHT_NORMAL);
     g_fontSmall = makeFormat(11.5f, DWRITE_FONT_WEIGHT_NORMAL);
     g_fontCentre = makeFormat(12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
                               DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER);
+    g_fontCentreLight = makeFormat(12.f, DWRITE_FONT_WEIGHT_NORMAL,
+                                   DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER);
+    g_fontSmallRight = makeFormat(11.5f, DWRITE_FONT_WEIGHT_NORMAL,
+                                  DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    return g_fontHeading && g_fontTitle && g_fontBody && g_fontSmall && g_fontCentre;
+    return g_fontHeading && g_fontTitle && g_fontBody && g_fontSmall && g_fontCentre &&
+           g_fontCentreLight && g_fontSmallRight;
 }
 
 void destroyGraphics() {
@@ -791,6 +938,8 @@ void destroyGraphics() {
         }
     };
 
+    release(g_fontSmallRight);
+    release(g_fontCentreLight);
     release(g_fontCentre);
     release(g_fontSmall);
     release(g_fontBody);
@@ -798,6 +947,8 @@ void destroyGraphics() {
     release(g_fontHeading);
     release(g_brush);
     release(g_target);
+    release(g_bundledFonts);
+    release(g_dwrite5);
     release(g_dwriteFactory);
     release(g_d2dFactory);
 }
