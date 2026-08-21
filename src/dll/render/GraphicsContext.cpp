@@ -50,11 +50,17 @@ void GraphicsContext::setCommandQueue(ID3D12CommandQueue* queue) {
 
 void GraphicsContext::markDeviceLost() {
     const std::lock_guard lock(mutex_);
+    markDeviceLostLocked("device lost");
+}
+
+// Callers that already hold the lock. The reason is logged rather than assumed: this
+// is now reached from a window resize as well as from a genuinely lost device.
+void GraphicsContext::markDeviceLostLocked(std::string_view reason) {
     if (deviceLost_) return;
 
     deviceLost_ = true;
     ready_ = false;
-    Log::warn(kLog, "device lost, dropping graphics resources");
+    Log::warn(kLog, "{}, dropping graphics resources", reason);
 
     releaseTargets();
 
@@ -103,12 +109,14 @@ bool GraphicsContext::attach(IDXGISwapChain* swapChain) {
         lastClientHeight_ = clientHeight;
         noteWindowChanged();
 
-        // Let go now rather than at the rebuild: the game is recreating its swapchain
-        // while the window moves, and it must not find our references on the buffers
-        // it is destroying.
-        if (!targets_.empty()) {
+        // Letting go of the buffers is not enough. The 11on12 and D2D devices are built
+        // on the game's own device and its command queue, and vkd3d-proton reallocates
+        // the swapchain from a thread of its own — the game ends itself somewhere in
+        // there, with nothing of ours on the stack. So everything interop goes, not
+        // just the buffers, and the next settled frame builds it back.
+        if (!targets_.empty() || d2dContext_) {
             Log::debug(kLog, "window is now {}x{}, going dark", clientWidth, clientHeight);
-            releaseTargets();
+            markDeviceLostLocked("window resized");
         }
         return false;
     }
@@ -224,14 +232,12 @@ void GraphicsContext::applyPendingRelease() {
     if (!releasePending_.exchange(false, std::memory_order_acq_rel)) return;
 
     const std::lock_guard lock(mutex_);
-    if (targets_.empty()) {
+    if (targets_.empty() && !d2dContext_) {
         ready_ = false;
         return;
     }
 
-    Log::info(kLog, "window changed, letting go of the back buffers");
-
-    releaseTargets();
+    markDeviceLostLocked("window changed");
 }
 
 bool GraphicsContext::waitForGpu() {

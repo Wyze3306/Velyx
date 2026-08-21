@@ -76,6 +76,7 @@ private:
     ProfileManager() = default;
 
     void createStarterProfiles();
+    void fillEmptyStarterProfiles();
     void dropShippedServerProfiles();
     [[nodiscard]] nlohmann::json serializeCurrent() const;
     void applyDocument(const nlohmann::json& document);

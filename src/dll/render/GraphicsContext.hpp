@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <string_view>
 #include <vector>
 
 #include "core/Math.hpp"
@@ -65,6 +66,7 @@ private:
 
     bool createDeviceResources(IDXGISwapChain* swapChain);
     bool createTargets(IDXGISwapChain* swapChain);
+    void markDeviceLostLocked(std::string_view reason);
     bool createD2D(IUnknown* deviceForD2D);
 
     std::recursive_mutex mutex_;

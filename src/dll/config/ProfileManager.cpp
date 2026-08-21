@@ -93,6 +93,119 @@ nlohmann::json profileToJson(const Profile& profile) {
     return json;
 }
 
+
+// What each starter profile switches on, and where the readouts sit. Positions are a
+// fraction of the screen, and name the corner of the element the anchor holds — so a
+// column down the left edge is one x with a growing y.
+struct StarterModule {
+    const char* id;
+    const char* anchor = nullptr;
+    float x = 0.f;
+    float y = 0.f;
+};
+
+struct Starter {
+    Profile profile;
+    std::vector<StarterModule> modules;
+};
+
+const std::vector<Starter>& starters() {
+    static const std::vector<Starter> kStarters{
+        {Profile{"Global", "The default profile, used when no other one is picked.",
+                 {}, false, true, 0},
+         {
+             {"notifications"},
+             {"fps", "Top left", 0.012f, 0.022f},
+             {"clock", "Top right", 0.988f, 0.022f},
+             {"coordinates", "Bottom left", 0.012f, 0.978f},
+             {"direction", "Bottom left", 0.012f, 0.938f},
+         }},
+
+        {Profile{"PvP", "Minimal latency, effects cut back, a readable HUD.",
+                 {}, false, false, 0},
+         {
+             {"notifications"},
+             {"performance_mode"},
+             {"null_movement"},
+             {"crosshair"},
+             {"fps", "Top left", 0.012f, 0.022f},
+             {"cps", "Top left", 0.012f, 0.062f},
+             {"ping", "Top left", 0.012f, 0.102f},
+             {"keystrokes", "Bottom left", 0.012f, 0.978f},
+             {"session_stats", "Bottom right", 0.988f, 0.978f},
+         }},
+
+        {Profile{"Performance", "The bare minimum on screen, everything else off.",
+                 {}, false, false, 0},
+         {
+             {"performance_mode"},
+             {"fps", "Top left", 0.012f, 0.022f},
+         }},
+
+        {Profile{"Survival", "The full HUD: coordinates, compass, armour and the clock.",
+                 {}, false, false, 0},
+         {
+             {"notifications"},
+             {"fps", "Top left", 0.012f, 0.022f},
+             {"clock", "Top right", 0.988f, 0.022f},
+             {"playtime", "Top right", 0.988f, 0.062f},
+             {"coordinates", "Bottom left", 0.012f, 0.978f},
+             {"direction", "Bottom left", 0.012f, 0.938f},
+             {"speed", "Bottom left", 0.012f, 0.898f},
+             {"armour", "Bottom right", 0.988f, 0.978f},
+         }},
+    };
+    return kStarters;
+}
+
+// Laid over what the document already holds rather than replacing it: a profile that
+// has never been switched on may still carry colours and sizes somebody chose.
+void applyStarterModules(nlohmann::json& document, const Starter& starter) {
+    nlohmann::json& modules = document["modules"];
+    if (!modules.is_object()) modules = nlohmann::json::object();
+
+    for (const StarterModule& entry : starter.modules) {
+        nlohmann::json& module = modules[entry.id];
+        if (!module.is_object()) module = nlohmann::json::object();
+
+        module["enabled"] = true;
+
+        if (!entry.anchor) continue;
+
+        nlohmann::json& settings = module["settings"];
+        if (!settings.is_object()) settings = nlohmann::json::object();
+
+        settings["anchor"] = entry.anchor;
+        settings["position"] = nlohmann::json{{"x", entry.x}, {"y", entry.y}};
+    }
+}
+
+// Nothing switched on is what an untouched starter looks like. The notification centre
+// is on everywhere and says nothing about whether the profile was ever set up.
+bool anyModuleEnabled(const nlohmann::json& document) {
+    const auto modules = document.find("modules");
+    if (modules == document.end() || !modules->is_object()) return false;
+
+    for (const auto& [id, module] : modules->items()) {
+        if (id == "notifications" || !module.is_object()) continue;
+        if (module.value("enabled", false)) return true;
+    }
+    return false;
+}
+
+nlohmann::json documentFor(const Starter& starter) {
+    Profile profile = starter.profile;
+    profile.modifiedAt = nowMs();
+
+    nlohmann::json document;
+    document["formatVersion"] = kFormatVersion;
+    document["profile"] = profileToJson(profile);
+    document["modules"] = nlohmann::json::object();
+
+    applyStarterModules(document, starter);
+    return document;
+}
+
 }
 
 ProfileManager& ProfileManager::get() {
@@ -125,30 +238,34 @@ std::string ProfileManager::uniqueName(const std::string& wanted) const {
 
 void ProfileManager::createStarterProfiles() {
 
-    // Contexts, not servers: a profile that names one is out of date the day that
-    // server changes, and Velyx has no business shipping a list of them.
-    const std::vector<Profile> starters{
-        Profile{"Global", "The default profile, used when no other one is picked.",
-                {}, false, true, nowMs()},
-        Profile{"PvP", "Minimal latency, effects cut back, a readable HUD.",
-                {}, false, false, nowMs()},
-        Profile{"Performance", "The bare minimum on screen, everything else off.",
-                {}, false, false, nowMs()},
-        Profile{"Survival", "The full HUD: coordinates, compass, waypoints.",
-                {}, false, false, nowMs()},
-    };
+    for (const Starter& starter : starters()) {
+        if (exists(starter.profile.name)) continue;
 
-    for (const Profile& profile : starters) {
-        nlohmann::json document;
-        document["formatVersion"] = kFormatVersion;
-        document["profile"] = profileToJson(profile);
-        document["modules"] = nlohmann::json::object();
+        writeJson(fileFor(starter.profile.name), documentFor(starter));
+        profiles_.push_back(starter.profile);
 
-        writeJson(fileFor(profile.name), document);
-        profiles_.push_back(profile);
+        Log::info(kLog, "created the '{}' starter profile", starter.profile.name);
     }
+}
 
-    Log::info(kLog, "created the starter profiles ({})", starters.size());
+// A starter profile with nothing switched on is a menu of empty boxes: it says a
+// profile is something you build rather than something that works. Earlier builds
+// shipped exactly that, so one that was never set up is filled in.
+void ProfileManager::fillEmptyStarterProfiles() {
+    for (const Starter& starter : starters()) {
+        const Profile* profile = findMutable(starter.profile.name);
+        if (!profile) continue;
+
+        nlohmann::json document = readJson(fileFor(profile->name));
+        if (document.is_null() || anyModuleEnabled(document)) continue;
+
+        applyStarterModules(document, starter);
+
+        if (writeJson(fileFor(profile->name), document)) {
+            Log::info(kLog, "filled in the '{}' profile, which had nothing switched on",
+                      profile->name);
+        }
+    }
 }
 
 // Earlier builds shipped two profiles named after servers and a set of matching rules
@@ -169,6 +286,18 @@ void ProfileManager::dropShippedServerProfiles() {
         std::erase_if(profiles_, [&](const Profile& p) { return p.name == name; });
 
         Log::info(kLog, "dropped the '{}' starter profile", name);
+    }
+
+    // "Survie" is what Survival used to be called. An untouched one is ours to drop;
+    // one the player has actually set up stays, under its old name.
+    if (const Profile* survie = findMutable("Survie")) {
+        if (!anyModuleEnabled(readJson(fileFor(survie->name)))) {
+            std::error_code ec;
+            std::filesystem::remove_all(Paths::profile(survie->name), ec);
+            std::erase_if(profiles_, [](const Profile& p) { return p.name == "Survie"; });
+
+            Log::info(kLog, "dropped the empty 'Survie' starter profile");
+        }
     }
 
     // The third one is still a profile worth having; only the rules it was shipped
@@ -207,11 +336,10 @@ void ProfileManager::load() {
         profiles_.push_back(profileFromJson(node, entry.path().filename().string()));
     }
 
-    if (profiles_.empty()) createStarterProfiles();
-
     dropShippedServerProfiles();
 
-    if (profiles_.empty()) createStarterProfiles();
+    createStarterProfiles();
+    fillEmptyStarterProfiles();
 
     if (!std::ranges::any_of(profiles_, [](const Profile& p) { return p.isDefault; })) {
         profiles_.front().isDefault = true;
