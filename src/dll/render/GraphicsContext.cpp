@@ -232,7 +232,6 @@ void GraphicsContext::applyPendingRelease() {
     Log::info(kLog, "window changed, letting go of the back buffers");
 
     releaseTargets();
-    Log::info(kLog, "release: done");
 }
 
 bool GraphicsContext::waitForGpu() {
@@ -460,18 +459,15 @@ void GraphicsContext::releaseTargets() {
 
     if (d2dContext_) d2dContext_->SetTarget(nullptr);
 
-    // Unbind and submit before anything is destroyed. The context still names these
-    // buffers; dropping them first left the flush below submitting a command stream
-    // that referred to resources already freed, and it was the game's next present
-    // that fell over it — which is why the overlay only took the game down when it
-    // had actually drawn into them that frame.
+    // Unbind and submit before anything is destroyed, so the flush never carries a
+    // command stream naming resources that are already gone.
     if (context11_) {
         context11_->ClearState();
         context11_->Flush();
     }
 
-    // Then let the GPU finish with what was just submitted, so a wrapped back buffer
-    // is never freed while it is still being read.
+    // Then let the GPU finish with what was just submitted: a wrapped back buffer must
+    // not be freed while it is still being read.
     waitForGpu();
 
     targets_.clear();
