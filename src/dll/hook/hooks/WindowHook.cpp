@@ -35,6 +35,21 @@ std::atomic<bool> g_releasePending{false};
 Vec2 g_mouse;
 bool g_keys[256]{};
 
+// GetKeyState answers for the calling thread's queue, and the answer it gives inside
+// a game's own procedure is not always the truth — a bind with Ctrl in it would then
+// never match, however hard the key is held. Every key already passes through here, so
+// what was seen is asked first and GetKeyState is only the second opinion.
+bool modifierHeld(int generic, int left, int right) {
+    if (g_keys[generic] || g_keys[left] || g_keys[right]) return true;
+    return (GetKeyState(generic) & 0x8000) != 0;
+}
+
+void fillModifiers(KeyEvent& event) {
+    event.shift = modifierHeld(VK_SHIFT, VK_LSHIFT, VK_RSHIFT);
+    event.ctrl = modifierHeld(VK_CONTROL, VK_LCONTROL, VK_RCONTROL);
+    event.alt = modifierHeld(VK_MENU, VK_LMENU, VK_RMENU);
+}
+
 MouseButton buttonFor(UINT message, WPARAM wParam) {
     switch (message) {
         case WM_LBUTTONDOWN:
@@ -319,6 +334,7 @@ LRESULT WindowHook::dispatch(HWND window, UINT message, WPARAM wParam, LPARAM lP
             KeyEvent keyEvent;
             keyEvent.key = virtualKeyFor(button);
             keyEvent.down = down;
+            fillModifiers(keyEvent);
             events().emit(keyEvent);
 
             if (capturing || event.cancelled) return 0;
@@ -349,9 +365,7 @@ LRESULT WindowHook::dispatch(HWND window, UINT message, WPARAM wParam, LPARAM lP
             event.key = key;
             event.down = down;
             event.repeat = down && (lParam & (1 << 30)) != 0;
-            event.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-            event.ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-            event.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+            fillModifiers(event);
             events().emit(event);
 
             if (event.cancelled) return 0;

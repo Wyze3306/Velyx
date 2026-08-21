@@ -6,10 +6,13 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <format>
 
+#include "core/Lang.hpp"
 #include "core/Strings.hpp"
 #include "dll/Velyx.hpp"
+#include "dll/config/ClientConfig.hpp"
 #include "dll/feature/Clips.hpp"
 #include "dll/feature/Playtime.hpp"
 #include "dll/feature/Screenshot.hpp"
@@ -810,6 +813,75 @@ private:
     int thisSession_ = 0;
 };
 
+// The one thing a client cannot afford to leave unsaid: which key opens it. Drawn
+// while nothing of Velyx is on screen, in the corner the game leaves empty, and it
+// gets out of the way once the menu has been opened.
+class MenuHint final : public Module {
+public:
+    MenuHint()
+        : Module("menu_hint", "Menu reminder", ModuleCategory::Client,
+                 "A corner badge naming the key that opens the client.") {
+        settings.toggle("hideAfterFirstOpen", "Hide once the menu has been opened", false);
+        settings.slider("hintOpacity", "Opacity", 0.75f, 0.2f, 1.f);
+
+        on(&MenuHint::onRender);
+        addKeywords({"hint", "reminder", "key", "menu", "help"});
+    }
+
+private:
+    void onRender(RenderEvent& event) {
+        if (modules().anyInterfaceOpen()) return;
+        if (opened_ && settings.value<bool>("hideAfterFirstOpen", false)) return;
+
+        Module* menu = modules().find("clickgui");
+        if (menu && menu->enabled()) {
+            opened_ = true;
+            return;
+        }
+
+        Renderer& renderer = *event.renderer;
+        const auto& active = theme();
+        const float alpha = settings.value<float>("hintOpacity", 0.75f);
+
+        const std::string keys =
+            std::string(tr("Open the menu")) + "  " + describeKeybind(config().guiKey) + "   ·   " +
+            std::string(tr("Search")) + "  " + describeKeybind(config().searchKey);
+
+        FontSpec spec;
+        spec.family = active.fontFamily;
+        spec.size = 12.f * active.fontScale;
+        spec.weight = FontWeight::Medium;
+        spec.valign = TextVAlign::Middle;
+
+        const Vec2 size = renderer.measure(keys, spec);
+        const Rect badge = Rect::fromSize(14.f, 14.f, size.x + 58.f, 30.f);
+
+        renderer.fillRounded(badge, active.backgroundDeep.withAlpha(0.55f * alpha), 9.f);
+        renderer.strokeRounded(badge, active.border.withAlpha(0.6f * alpha), 9.f, 1.f);
+
+        const Rect mark{badge.left + 7.f, badge.center().y - 8.f, badge.left + 23.f,
+                        badge.center().y + 8.f};
+
+        static const std::filesystem::path markFile = Velyx::get().asset("icon.png");
+        if (ID2D1Bitmap1* icon = renderer.image(markFile)) {
+            renderer.drawImageRounded(icon, mark, 4.5f, alpha);
+        }
+
+        renderer.text("VELYX", Rect{mark.right + 8.f, badge.top, mark.right + 52.f, badge.bottom},
+                      active.text.withAlpha(alpha), [&] {
+                          FontSpec brand = spec;
+                          brand.size = 11.f * active.fontScale;
+                          brand.weight = FontWeight::Bold;
+                          return brand;
+                      }());
+
+        renderer.text(keys, Rect{mark.right + 52.f, badge.top, badge.right - 8.f, badge.bottom},
+                      active.textMuted.withAlpha(alpha), spec);
+    }
+
+    bool opened_ = false;
+};
+
 } // namespace
 
 void registerClientModules(ModuleManager& manager) {
@@ -825,6 +897,7 @@ void registerClientModules(ModuleManager& manager) {
     manager.add<CustomHitColor>();
     manager.add<CustomDamageTint>();
     manager.add<ClipMarkers>();
+    manager.add<MenuHint>();
 }
 
 } // namespace velyx

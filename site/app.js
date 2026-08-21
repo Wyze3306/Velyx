@@ -27,6 +27,7 @@
     m('client', 'Menu Velyx', 'Velyx menu', 'Le menu principal. Ctrl+K l’ouvre sur la recherche.', 'The main menu. Ctrl+K opens it on the search.'),
     m('client', 'Éditeur de HUD', 'HUD editor', 'Place les éléments à l’écran.', 'Arranges the elements on screen.'),
     m('client', 'Centre de notifications', 'Notification centre', 'Ce que le client a fait, et quand.', 'What the client did, and when.'),
+    m('client', 'Rappel du menu', 'Menu reminder', 'Un badge dans le coin, avec la touche qui ouvre le client.', 'A corner badge naming the key that opens the client.'),
     m('client', 'Assistant de démarrage', 'Setup assistant', 'Cinq écrans au premier lancement.', 'Five screens on the first run.'),
 
     /* movement */

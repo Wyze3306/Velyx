@@ -112,7 +112,7 @@ goes.
 
 ## The module catalogue
 
-44 modules are written. Most of what is left falls into three buckets:
+45 modules are written. Most of what is left falls into three buckets:
 
 - **HUD readouts**, which are twenty line `TextHud` subclasses. That is filling
   in, not design work;

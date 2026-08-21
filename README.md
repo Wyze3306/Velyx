@@ -31,7 +31,7 @@ interface itself looks is the client's, the same whichever profile is active. Ve
 ships four to start from — Global, PvP, Performance, Survival — keeps restore points,
 and exports either a profile or a theme as a single line you can paste to a friend.
 
-**44 modules.** Movement and camera, HUD readouts, a crosshair designer,
+**45 modules.** Movement and camera, HUD readouts, a crosshair designer,
 performance and battery modes, accessibility, screen filters including colour
 blindness aids, screenshots with a thumbnail gallery, clip markers, benchmark,
 privacy and streamer modes.

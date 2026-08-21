@@ -170,6 +170,7 @@ void ModuleManager::handleKey(KeyEvent& event) {
                 continue;
             }
 
+            Log::debug(kLog, "shortcut fired for key {}{}", event.ctrl ? "ctrl+" : "", event.key);
             shortcut.action();
             consumed = true;
         }
