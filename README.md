@@ -19,15 +19,19 @@ it, so there is no folder to keep together and nothing to install.
 
 ## What it does
 
-**In game.** One menu with fuzzy search over every module and every setting, a
-HUD editor with grid snapping, alignment guides and element groups, a live theme
-editor, a `Ctrl+K` command palette, and a notification centre.
+**In game.** The interface is in English, with French shipped as a translation table
+(`assets/lang/fr.json`) you pick from the menu — add a file to add a language. One
+menu with fuzzy search over every module and every setting —
+`Ctrl+K` opens it straight on that search — a HUD editor with grid snapping,
+alignment guides and element groups, a live theme editor, and a notification
+centre.
 
-**Profiles.** Module state, HUD layout and theme travel together. Velyx switches
-profile on its own based on the server you join, keeps restore points, and
-exports a profile as a single line you can paste to a friend.
+**Profiles.** A profile carries the modules and the HUD, and nothing else: how the
+interface itself looks is the client's, the same whichever profile is active. Velyx
+ships four to start from — Global, PvP, Performance, Survival — keeps restore points,
+and exports either a profile or a theme as a single line you can paste to a friend.
 
-**45 modules.** Movement and camera, HUD readouts, a crosshair designer,
+**44 modules.** Movement and camera, HUD readouts, a crosshair designer,
 performance and battery modes, accessibility, screen filters including colour
 blindness aids, screenshots with a thumbnail gallery, clip markers, benchmark,
 privacy and streamer modes.

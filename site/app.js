@@ -24,9 +24,8 @@
 
   var MODULES = [
     /* client */
-    m('client', 'Menu Velyx', 'Velyx menu', 'Le menu principal, avec la recherche.', 'The main menu, with the search.'),
+    m('client', 'Menu Velyx', 'Velyx menu', 'Le menu principal. Ctrl+K l’ouvre sur la recherche.', 'The main menu. Ctrl+K opens it on the search.'),
     m('client', 'Éditeur de HUD', 'HUD editor', 'Place les éléments à l’écran.', 'Arranges the elements on screen.'),
-    m('client', 'Palette de commandes', 'Command palette', 'Ctrl+K, puis tapez ce que vous cherchez.', 'Ctrl+K, then type what you are after.'),
     m('client', 'Centre de notifications', 'Notification centre', 'Ce que le client a fait, et quand.', 'What the client did, and when.'),
     m('client', 'Assistant de démarrage', 'Setup assistant', 'Cinq écrans au premier lancement.', 'Five screens on the first run.'),
 

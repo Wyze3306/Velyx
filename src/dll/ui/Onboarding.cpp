@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <array>
+#include <filesystem>
 #include <format>
 
 #include "dll/Velyx.hpp"
@@ -30,11 +31,11 @@ struct Preset {
 };
 
 constexpr std::array<Preset, 3> kPresets{{
-    {"pvp", "PvP", "HUD compact, viseur, latence et framerate en évidence.", "PvP",
-     "Nuit"},
-    {"survie", "Survie", "Coordonnées, boussole, armure et statistiques de session.", "Survie",
+    {"pvp", "PvP", "A compact HUD: crosshair, latency and framerate up front.", "PvP",
+     "Night"},
+    {"survival", "Survival", "Coordinates, compass, armour and session stats.", "Survival",
      "Velyx"},
-    {"stream", "Streaming", "Informations personnelles masquées, captures rangées.", "Global",
+    {"stream", "Streaming", "Personal details hidden, screenshots filed away.", "Global",
      "Velyx"},
 }};
 
@@ -47,15 +48,15 @@ const char* const kStreamModules[] = {"streamer_mode", "clock", "fps", "screensh
 } // namespace
 
 Onboarding::Onboarding()
-    : Module("onboarding", "Assistant de démarrage", ModuleCategory::Client,
-             "Configuration guidée au premier lancement.") {
-    markEssential();
+    : Module("onboarding", "Setup assistant", ModuleCategory::Client,
+             "A guided set-up on the first run.") {
+    markInterfaceModule();
 
     on(&Onboarding::onRender);
     on(&Onboarding::onMouse, EventPriority::First);
     on(&Onboarding::onKey, EventPriority::First);
 
-    addKeywords({"assistant", "onboarding", "démarrage", "premier lancement"});
+    addKeywords({"assistant", "onboarding", "startup", "first run"});
 }
 
 void Onboarding::onEnable() {
@@ -67,7 +68,9 @@ void Onboarding::onEnable() {
     WindowHook::setCaptureInput(true);
 }
 
-void Onboarding::onDisable() { WindowHook::setCaptureInput(false); }
+void Onboarding::onDisable() {
+    if (!modules().anyInterfaceOpen()) WindowHook::setCaptureInput(false);
+}
 
 void Onboarding::onMouse(MouseEvent& event) {
     ui().feedMouse(event);
@@ -94,7 +97,7 @@ void Onboarding::applyPreset(const std::string& preset) {
 
     if (preset == "pvp") {
         enable(kPvpModules, std::size(kPvpModules));
-    } else if (preset == "survie") {
+    } else if (preset == "survival") {
         enable(kSurvivalModules, std::size(kSurvivalModules));
     } else {
         enable(kStreamModules, std::size(kStreamModules));
@@ -104,6 +107,8 @@ void Onboarding::applyPreset(const std::string& preset) {
         if (preset != entry.id) continue;
 
         ThemeManager::get().apply(entry.theme);
+        config().theme = entry.theme;
+
         if (profiles().exists(entry.profile)) {
             profiles().switchTo(entry.profile);
             config().activeProfile = entry.profile;
@@ -123,19 +128,29 @@ void Onboarding::drawWelcome(const Rect& body) {
     Ui& gui = ui();
     const auto& active = theme();
 
-    gui.text("Bienvenue dans Velyx",
-             Rect{body.left, body.top, body.right, body.top + 40.f}, active.text, 26.f,
+    static const std::filesystem::path markFile = Velyx::get().asset("icon.png");
+
+    const Rect mark{body.left, body.top + 2.f, body.left + 34.f, body.top + 36.f};
+    float titleLeft = body.left;
+
+    if (ID2D1Bitmap1* icon = gui.renderer().image(markFile)) {
+        gui.renderer().drawImageRounded(icon, mark, 9.f);
+        titleLeft = mark.right + 14.f;
+    }
+
+    gui.text("Welcome to Velyx",
+             Rect{titleLeft, body.top, body.right, body.top + 40.f}, active.text, 26.f,
              FontWeight::Bold);
 
-    gui.text("Quelques questions pour arriver sur quelque chose d'utilisable tout de suite. "
-             "Tout reste modifiable ensuite depuis le menu.",
+    gui.text("A few questions to land on something usable straight away. "
+             "Everything stays changeable from the menu afterwards.",
              Rect{body.left, body.top + 44.f, body.right, body.top + 100.f}, active.textMuted,
              13.5f);
 
     const std::array<std::pair<const char*, const char*>, 3> points{{
-        {"Un seul menu", "Modules, réglages, thèmes et profils au même endroit."},
-        {"Des profils par serveur", "Velyx bascule tout seul selon où vous jouez."},
-        {"Rien d'automatisé", "Aucun module ne joue à votre place."},
+        {"One menu", "Modules, settings, themes and profiles in one place."},
+        {"Profiles", "Modules, HUD and theme change together, in one click."},
+        {"Nothing automated", "No module plays for you."},
     }};
 
     float y = body.top + 118.f;
@@ -153,9 +168,9 @@ void Onboarding::drawStyle(const Rect& body) {
     Ui& gui = ui();
     const auto& active = theme();
 
-    gui.text("Choisissez un thème", Rect{body.left, body.top, body.right, body.top + 34.f},
+    gui.text("Pick a theme", Rect{body.left, body.top, body.right, body.top + 34.f},
              active.text, 22.f, FontWeight::Bold);
-    gui.text("Les couleurs, les arrondis et les animations se règlent en détail plus tard.",
+    gui.text("Colours, corners and animation are yours to tune later on.",
              Rect{body.left, body.top + 34.f, body.right, body.top + 60.f}, active.textMuted, 13.f);
 
     const auto& all = ThemeManager::get().all();
@@ -189,13 +204,16 @@ void Onboarding::drawStyle(const Rect& body) {
                                   card.bottom - 12.f},
                  entry.text, 12.5f, FontWeight::SemiBold);
 
-        if (pressed) ThemeManager::get().apply(entry.name);
+        if (pressed) {
+            ThemeManager::get().apply(entry.name);
+            config().theme = entry.name;
+        }
     }
 
     bool rgb = active.rgbAccent;
     if (gui.toggleRow(UiId("onboard_rgb"),
                       Rect{body.left, body.top + 216.f, body.right, body.top + 260.f},
-                      "Accent animé", "Fait défiler la teinte de la couleur d'accent.", rgb)) {
+                      "Animated accent", "Cycles the accent colour's hue.", rgb)) {
         ThemeManager::get().mutableCurrent().rgbAccent = rgb;
     }
 }
@@ -204,9 +222,9 @@ void Onboarding::drawUsage(const Rect& body) {
     Ui& gui = ui();
     const auto& active = theme();
 
-    gui.text("Comment jouez-vous ?", Rect{body.left, body.top, body.right, body.top + 34.f},
+    gui.text("How do you play?", Rect{body.left, body.top, body.right, body.top + 34.f},
              active.text, 22.f, FontWeight::Bold);
-    gui.text("Velyx active un premier jeu de modules et le profil qui va avec.",
+    gui.text("Velyx switches on a first set of modules and the profile that goes with it.",
              Rect{body.left, body.top + 34.f, body.right, body.top + 60.f}, active.textMuted, 13.f);
 
     float y = body.top + 78.f;
@@ -244,16 +262,16 @@ void Onboarding::drawKeys(const Rect& body) {
     const auto& active = theme();
     ClientConfig& settings = config();
 
-    gui.text("Vos raccourcis", Rect{body.left, body.top, body.right, body.top + 34.f}, active.text,
+    gui.text("Your keybinds", Rect{body.left, body.top, body.right, body.top + 34.f}, active.text,
              22.f, FontWeight::Bold);
-    gui.text("Modifiables à tout moment depuis la page Raccourcis.",
+    gui.text("Changeable at any time from the Keybinds page.",
              Rect{body.left, body.top + 34.f, body.right, body.top + 60.f}, active.textMuted, 13.f);
 
     const std::array<std::pair<const char*, Keybind*>, 4> binds{{
-        {"Ouvrir le menu", &settings.guiKey},
-        {"Palette de commandes", &settings.paletteKey},
-        {"Éditeur de HUD", &settings.hudEditorKey},
-        {"Capture d'écran", &settings.screenshotKey},
+        {"Open the menu", &settings.guiKey},
+        {"Open the menu on the search", &settings.searchKey},
+        {"HUD editor", &settings.hudEditorKey},
+        {"Screenshot", &settings.screenshotKey},
     }};
 
     float y = body.top + 80.f;
@@ -273,8 +291,6 @@ void Onboarding::drawKeys(const Rect& body) {
 
             if (bind == &settings.guiKey) {
                 if (Module* menu = modules().find("clickgui")) menu->keybind() = value;
-            } else if (bind == &settings.paletteKey) {
-                if (Module* palette = modules().find("command_palette")) palette->keybind() = value;
             } else if (bind == &settings.hudEditorKey) {
                 if (Module* editor = modules().find("hud_editor")) editor->keybind() = value;
             } else if (bind == &settings.screenshotKey) {
@@ -294,7 +310,7 @@ void Onboarding::drawDone(const Rect& body) {
     const auto& active = theme();
     const Signatures& signatures = Signatures::get();
 
-    gui.text("Tout est prêt", Rect{body.left, body.top, body.right, body.top + 34.f}, active.text,
+    gui.text("All set", Rect{body.left, body.top, body.right, body.top + 34.f}, active.text,
              22.f, FontWeight::Bold);
 
     const auto missing = signatures.missing();
@@ -306,20 +322,20 @@ void Onboarding::drawDone(const Rect& body) {
     gui.renderer().strokeRounded(banner, (healthy ? active.success : active.warning).fade(0.5f),
                                  active.radius, 1.f);
 
-    gui.text(healthy ? "Le pack de signatures correspond à votre version du jeu."
-                     : "Aucun pack de signatures pour cette version du jeu.",
+    gui.text(healthy ? "The signature pack matches your build of the game."
+                     : "No signature pack for this build of the game.",
              Rect{banner.left + 14.f, banner.top + 10.f, banner.right - 14.f, banner.top + 34.f},
              healthy ? active.success : active.warning, 13.5f, FontWeight::SemiBold);
 
     gui.text(healthy
-                 ? std::format("Minecraft {} détecté, tous les modules sont disponibles.",
+                 ? std::format("Minecraft {} detected, every module is available.",
                                signatures.gameVersion())
-                 : "Les modules qui lisent le jeu afficheront -- jusqu'à ce qu'un pack soit "
-                   "installé. Tout le reste fonctionne.",
+                 : "Modules that read the game will show -- until a pack is "
+                   "installed. Everything else works.",
              Rect{banner.left + 14.f, banner.top + 32.f, banner.right - 14.f, banner.bottom - 8.f},
              active.textMuted, 12.f);
 
-    gui.text(std::format("Appuyez sur {} pour ouvrir le menu à tout moment.",
+    gui.text(std::format("Press {} to open the menu at any time.",
                          describeKeybind(config().guiKey)),
              Rect{body.left, body.top + 140.f, body.right, body.top + 170.f}, active.text, 13.5f);
 }
@@ -376,13 +392,13 @@ void Onboarding::onRender(RenderTopEvent& event) {
         if (gui.button(UiId("onboard_back"),
                        Rect{card.right - 280.f, card.bottom - 58.f, card.right - 180.f,
                             card.bottom - 26.f},
-                       "Retour")) {
+                       "Back")) {
             --step_;
         }
     } else if (gui.button(UiId("onboard_skip"),
                           Rect{card.right - 280.f, card.bottom - 58.f, card.right - 180.f,
                                card.bottom - 26.f},
-                          "Passer")) {
+                          "Skip")) {
         finish();
     }
 
@@ -392,7 +408,7 @@ void Onboarding::onRender(RenderTopEvent& event) {
     if (gui.button(UiId("onboard_next"),
                    Rect{card.right - 170.f, card.bottom - 58.f, card.right - 32.f,
                         card.bottom - 26.f},
-                   last ? "Ouvrir le menu" : "Continuer", true, !blocked)) {
+                   last ? "Open the menu" : "Continue", true, !blocked)) {
         if (last) {
             finish();
             if (Module* menu = modules().find("clickgui")) menu->setEnabled(true);

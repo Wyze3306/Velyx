@@ -5,7 +5,6 @@
 #include "dll/modules/movement/MovementModules.hpp"
 #include "dll/modules/render/RenderModules.hpp"
 #include "dll/ui/ClickGui.hpp"
-#include "dll/ui/CommandPalette.hpp"
 #include "dll/ui/HudEditor.hpp"
 #include "dll/ui/Notifications.hpp"
 #include "dll/ui/Onboarding.hpp"
@@ -16,7 +15,6 @@ void registerBuiltInModules(ModuleManager& manager) {
 
     manager.add<ClickGui>();
     manager.add<HudEditor>();
-    manager.add<CommandPalette>();
     manager.add<Notifications>();
     manager.add<Onboarding>();
 

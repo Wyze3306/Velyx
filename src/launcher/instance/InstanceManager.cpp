@@ -190,14 +190,14 @@ std::optional<DWORD> exitCodeOf(HANDLE process) {
 std::string activationHint(HRESULT hr) {
     switch (static_cast<unsigned long>(hr)) {
         case 0x80270254UL:  // E_APPLICATION_NOT_REGISTERED
-            return "Windows ne connaît pas ce paquet. Réinstallez l'instance et vérifiez "
-                   "que le mode développeur est toujours actif.";
+            return "Windows does not know this package. Recreate the instance and check "
+                   "that developer mode is still on.";
         case 0x8027025AUL:  // E_APPLICATION_ACTIVATION_TIMED_OUT
-            return "Le jeu a mis trop de temps à démarrer.";
+            return "The game took too long to start.";
         case 0x80070005UL:  // E_ACCESSDENIED
-            return "Windows a refusé l'activation. Lancez Velyx sans les droits "
-                   "administrateur : un processus élevé ne peut pas démarrer une application "
-                   "du Store.";
+            return "Windows refused the activation. Run Velyx without administrator "
+                   "rights: an elevated process cannot start a Store "
+                   "application.";
         default:
             return {};
     }
@@ -422,7 +422,7 @@ bool InstanceManager::patchManifest(const std::filesystem::path& manifest,
     input.close();
 
     if (!replaceAttribute(xml, "Identity", "Name", packageName)) {
-        if (error) *error = "Identity/Name absent du manifeste";
+        if (error) *error = "Identity/Name missing from the manifest";
         return false;
     }
 
@@ -432,7 +432,7 @@ bool InstanceManager::patchManifest(const std::filesystem::path& manifest,
 
     std::ofstream output(manifest, std::ios::trunc);
     if (!output) {
-        if (error) *error = "manifeste en lecture seule";
+        if (error) *error = "the manifest is read only";
         return false;
     }
     output << xml;
@@ -441,9 +441,9 @@ bool InstanceManager::patchManifest(const std::filesystem::path& manifest,
 }
 
 std::string InstanceManager::CloneResult::failure() const {
-    std::string message = std::format("les fichiers du jeu n'ont pas pu être copiés "
-                                      "({} copiés, {} en échec)", copied, failed);
-    if (!firstError.empty()) message += ". Première erreur : " + firstError;
+    std::string message = std::format("the game files could not be copied "
+                                      "({} copied, {} failed)", copied, failed);
+    if (!firstError.empty()) message += ". First error: " + firstError;
     return message;
 }
 
@@ -552,12 +552,12 @@ bool InstanceManager::setVersion(Instance& instance, const VersionSource& source
     };
 
     if (instance.running() && Process::isRunning(instance.pid)) {
-        return fail("arrêtez l'instance avant de changer sa version");
+        return fail("stop the instance before changing its version");
     }
 
     std::error_code ec;
     if (!std::filesystem::exists(source.root / kGameExecutable, ec)) {
-        return fail("cette version n'est plus disponible sur le disque");
+        return fail("this version is no longer on the disk");
     }
 
     unregisterInstance(instance, nullptr);
@@ -601,12 +601,12 @@ bool InstanceManager::create(const std::string& name, CloneMode mode, const Prog
     std::string version;
     const auto source = findInstalledGame(&version);
     if (!source) {
-        return fail("Minecraft Bedrock n'est pas installé sur cette machine.");
+        return fail("Minecraft Bedrock is not installed on this machine.");
     }
 
     if (!developerModeEnabled()) {
-        return fail("Le mode développeur de Windows doit être activé "
-                    "(Paramètres > Confidentialité et sécurité > Espace développeurs).");
+        return fail("Windows developer mode has to be enabled "
+                    "(Settings > Privacy & security > For developers).");
     }
 
     Instance instance;
@@ -623,7 +623,7 @@ bool InstanceManager::create(const std::string& name, CloneMode mode, const Prog
 
     std::error_code ec;
     if (std::filesystem::exists(instance.root, ec)) {
-        return fail("le dossier " + instance.root.string() + " existe déjà");
+        return fail("the folder " + instance.root.string() + " already exists");
     }
     std::filesystem::create_directories(instance.root, ec);
 
@@ -668,7 +668,7 @@ bool InstanceManager::registerInstance(Instance& instance, std::string* error) {
 
     std::error_code ec;
     if (!std::filesystem::exists(manifest, ec)) {
-        if (error) *error = "manifeste introuvable pour " + instance.name;
+        if (error) *error = "no manifest found for " + instance.name;
         return false;
     }
 
@@ -682,7 +682,7 @@ bool InstanceManager::registerInstance(Instance& instance, std::string* error) {
         const std::wstring fallback = L"Add-AppxPackage -Path '" + manifest.wstring() +
                                       L"' -Register";
         if (runPowerShell(fallback, &output) != 0) {
-            if (error) *error = "Add-AppxPackage a échoué : " + std::string(strings::trim(output));
+            if (error) *error = "Add-AppxPackage failed: " + std::string(strings::trim(output));
             return false;
         }
     }
@@ -704,7 +704,7 @@ bool InstanceManager::unregisterInstance(Instance& instance, std::string* error)
                                  L"' | Remove-AppxPackage";
 
     if (runPowerShell(command, &output) != 0) {
-        if (error) *error = "Remove-AppxPackage a échoué : " + std::string(strings::trim(output));
+        if (error) *error = "Remove-AppxPackage failed: " + std::string(strings::trim(output));
         return false;
     }
 
@@ -720,7 +720,7 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
     };
 
     if (instance.running() && Process::isRunning(instance.pid)) {
-        return fail("cette instance est déjà lancée");
+        return fail("this instance is already running");
     }
 
     // A registration is per user and Windows drops it on its own — when the payload moves,
@@ -742,8 +742,8 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
     // the game refusing to come up unless the payload is ruled out first.
     std::error_code payloadEc;
     if (!std::filesystem::exists(instance.root / kGameExecutable, payloadEc)) {
-        return fail(std::format("{} est introuvable dans {} : les fichiers du jeu n'ont pas "
-                                "été copiés. Recréez l'instance.",
+        return fail(std::format("{} is missing from {}: the game files were not "
+                                "were copied. Recreate the instance.",
                                 kGameExecutable, instance.root.string()));
     }
 
@@ -792,7 +792,7 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
 
         if (FAILED(hr)) {
             const std::string hint = activationHint(hr);
-            return fail(std::format("ActivateApplication a échoué (0x{:08X}){}{}",
+            return fail(std::format("ActivateApplication failed (0x{:08X}){}{}",
                                     static_cast<unsigned>(hr), hint.empty() ? "" : " : ", hint));
         }
 
@@ -812,19 +812,19 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
     if (instance.pid == 0) {
         std::string detail;
         if (activatedPid == 0) {
-            detail = " Windows n'a rapporté aucun processus.";
+            detail = " Windows reported no process.";
         } else if (const auto code = exitCodeOf(starter)) {
-            detail = std::format(" Le processus lancé par Windows (pid {}) s'est arrêté avec "
-                                 "le code 0x{:08X} sans ouvrir le jeu.",
+            detail = std::format(" The process Windows started (pid {}) exited with "
+                                 "code 0x{:08X} without opening the game.",
                                  activatedPid, static_cast<unsigned>(*code));
         } else {
-            detail = std::format(" Le processus lancé par Windows (pid {}, {}) tourne encore "
-                                 "mais n'a jamais ouvert le jeu.",
+            detail = std::format(" The process Windows started (pid {}, {}) is still running "
+                                 "but never opened the game.",
                                  activatedPid, Process::imageName(activatedPid));
         }
 
         if (starter) CloseHandle(starter);
-        return fail("le jeu a été activé mais son processus reste introuvable." + detail);
+        return fail("the game was activated but its process cannot be found." + detail);
     }
 
     if (starter) CloseHandle(starter);
@@ -851,7 +851,7 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
 
     // Bedrock reaches its window through more than one process, so a pid that dies on us
     // was a step on the way there rather than the game: look the game up again and retry.
-    std::string injectionError = "le processus du jeu s'est arrêté avant l'injection";
+    std::string injectionError = "the game process stopped before the injection";
 
     for (int attempt = 1; attempt <= 3; ++attempt) {
         if (waitForGameReady(instance.pid, 30000) &&
@@ -871,7 +871,7 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
         save();
     }
 
-    if (error) *error = "Le jeu est lancé mais Velyx n'a pas pu être injecté : " + injectionError;
+    if (error) *error = "The game is running but Velyx could not be injected: " + injectionError;
     return false;
 }
 
@@ -880,7 +880,7 @@ bool InstanceManager::remove(const std::string& id, bool deleteFiles, std::strin
     if (!instance) return false;
 
     if (instance->running() && Process::isRunning(instance->pid)) {
-        if (error) *error = "arrêtez l'instance avant de la supprimer";
+        if (error) *error = "stop the instance before deleting it";
         return false;
     }
 

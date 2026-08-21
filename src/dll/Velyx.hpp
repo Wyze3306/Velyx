@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 
 #include "dll/event/Events.hpp"
 #include "dll/render/Renderer.hpp"
@@ -34,6 +35,10 @@ public:
 
     [[nodiscard]] double uptime() const;
 
+    // Where a bundled file lives for this session: next to the DLL when it was
+    // injected from a build tree, in %APPDATA%\Velyx when the launcher unpacked it.
+    [[nodiscard]] std::filesystem::path asset(std::string_view relative) const;
+
     [[nodiscard]] bool screenshotMode() const { return screenshotMode_; }
     void setScreenshotMode(bool enabled) { screenshotMode_ = enabled; }
 
@@ -55,6 +60,7 @@ private:
 
     HMODULE self_ = nullptr;
     HANDLE thread_ = nullptr;
+    std::filesystem::path assets_;
 
     Renderer renderer_;
 

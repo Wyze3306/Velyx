@@ -74,7 +74,7 @@ inline constexpr Color kMint = Color::rgb8(61, 220, 132);
 inline constexpr Color kGlow = Color::rgb8(124, 255, 178);
 inline constexpr Color kSnow = Color::rgb8(236, 239, 242);
 inline constexpr Color kAsh = Color::rgb8(154, 163, 172);
-inline constexpr Color kDim = Color::rgb8(107, 116, 128);
+inline constexpr Color kDim = Color::rgb8(124, 133, 143);
 inline constexpr Color kEmber = Color::rgb8(232, 96, 78);
 inline constexpr Color kHoney = Color::rgb8(240, 186, 84);
 

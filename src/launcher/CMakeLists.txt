@@ -20,6 +20,19 @@ foreach (doc IN ITEMS README.md template.json)
     list(APPEND VELYX_PAYLOAD_TARGETS "assets/signatures/${doc}")
 endforeach ()
 
+# The mark both interfaces draw. It travels in the payload rather than in the icon
+# resource, because Direct2D reads it from a file.
+list(APPEND VELYX_PAYLOAD_SOURCES "${CMAKE_SOURCE_DIR}/assets/icon.png")
+list(APPEND VELYX_PAYLOAD_TARGETS "assets/icon.png")
+
+# The interface is written in English; every other language is one of these tables.
+file(GLOB VELYX_LANG_FILES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/lang/*.json")
+foreach (table IN LISTS VELYX_LANG_FILES)
+    file(RELATIVE_PATH relative "${CMAKE_SOURCE_DIR}" "${table}")
+    list(APPEND VELYX_PAYLOAD_SOURCES "${table}")
+    list(APPEND VELYX_PAYLOAD_TARGETS "${relative}")
+endforeach ()
+
 # The resource compiler needs a plain path, so the freshly built DLL is staged
 # next to the generated script first.
 set(VELYX_PAYLOAD_DLL "${CMAKE_CURRENT_BINARY_DIR}/payload/Velyx.dll")
@@ -53,12 +66,18 @@ file(WRITE "${VELYX_MANIFEST}" "${VELYX_PAYLOAD_MAP}")
 set(VELYX_PAYLOAD "${CMAKE_CURRENT_BINARY_DIR}/velyx_payload.rc")
 file(WRITE "${VELYX_PAYLOAD}" "${VELYX_PAYLOAD_RC}VELYX_MANIFEST VELYXMAP \"${VELYX_MANIFEST}\"\n")
 
+set(VELYX_ICON_FILE "${CMAKE_SOURCE_DIR}/assets/velyx.ico")
+configure_file("${CMAKE_SOURCE_DIR}/cmake/icon.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/velyx_icon.rc" @ONLY)
+
 add_executable(VelyxLauncher WIN32 ${VELYX_LAUNCHER_SOURCES} ${VELYX_LAUNCHER_HEADERS}
-        "${VELYX_PAYLOAD}")
+        "${VELYX_PAYLOAD}" "${CMAKE_CURRENT_BINARY_DIR}/velyx_icon.rc")
 
 add_dependencies(VelyxLauncher velyx_payload_dll)
 set_source_files_properties("${VELYX_PAYLOAD}" PROPERTIES
         OBJECT_DEPENDS "${VELYX_PAYLOAD_DLL};${VELYX_MANIFEST};${VELYX_PAYLOAD_SOURCES}")
+set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/velyx_icon.rc" PROPERTIES
+        OBJECT_DEPENDS "${VELYX_ICON_FILE}")
 
 set_target_properties(VelyxLauncher PROPERTIES
         OUTPUT_NAME "Velyx"
@@ -71,6 +90,7 @@ target_link_libraries(VelyxLauncher PRIVATE
         d2d1
         dwrite
         dwmapi
+        windowscodecs
         ole32
         oleaut32
         uuid

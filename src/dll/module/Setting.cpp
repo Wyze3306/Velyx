@@ -279,11 +279,11 @@ void Settings::load(const nlohmann::json& json) {
 }
 
 std::string describeKeybind(const Keybind& bind) {
-    if (!bind.bound()) return "Non assignée";
+    if (!bind.bound()) return "Unbound";
 
     std::string label;
     if (bind.ctrl) label += "Ctrl + ";
-    if (bind.shift) label += "Maj + ";
+    if (bind.shift) label += "Shift + ";
     if (bind.alt) label += "Alt + ";
     label += WindowHook::keyName(bind.key);
 

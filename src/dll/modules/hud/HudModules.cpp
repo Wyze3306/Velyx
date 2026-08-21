@@ -29,17 +29,17 @@ std::string formatCoordinate(float value, int decimals) {
 class FpsHud final : public TextHud {
 public:
     FpsHud()
-        : TextHud("fps", "FPS", "Images par seconde, avec seuils de couleur.",
+        : TextHud("fps", "FPS", "Frames per second, with colour thresholds.",
                   {0.01f, 0.02f}, HudAnchor::TopLeft) {
         addTextSettings(true);
 
-        settings.header("Seuils");
-        settings.toggle("colorThresholds", "Colorer selon la performance", true);
-        settings.intSlider("warnBelow", "Seuil orange", 60, 10, 240, "", " FPS");
-        settings.intSlider("badBelow", "Seuil rouge", 30, 5, 120, "", " FPS");
-        settings.toggle("showLows", "Afficher les 1% lows", false);
+        settings.header("Thresholds");
+        settings.toggle("colorThresholds", "Colour by performance", true);
+        settings.intSlider("warnBelow", "Amber threshold", 60, 10, 240, "", " FPS");
+        settings.intSlider("badBelow", "Red threshold", 30, 5, 120, "", " FPS");
+        settings.toggle("showLows", "Show 1% lows", false);
 
-        addKeywords({"fps", "images", "performance", "framerate"});
+        addKeywords({"fps", "frames", "performance", "framerate"});
     }
 
     std::vector<Row> rows() override {
@@ -73,17 +73,17 @@ public:
 class CpsHud final : public TextHud {
 public:
     CpsHud()
-        : TextHud("cps", "CPS", "Clics par seconde, gauche et droite.",
+        : TextHud("cps", "CPS", "Clicks per second, left and right.",
                   {0.01f, 0.08f}, HudAnchor::TopLeft) {
         addTextSettings(true);
 
-        settings.header("Boutons");
-        settings.toggle("showLeft", "Clic gauche", true);
-        settings.toggle("showRight", "Clic droit", false);
-        settings.toggle("combined", "Fusionner sur une ligne", false);
-        settings.toggle("showPeak", "Afficher le record de la session", false);
+        settings.header("Buttons");
+        settings.toggle("showLeft", "Left click", true);
+        settings.toggle("showRight", "Right click", false);
+        settings.toggle("combined", "Merge onto one line", false);
+        settings.toggle("showPeak", "Show the session best", false);
 
-        addKeywords({"cps", "clics", "clicks", "souris"});
+        addKeywords({"cps", "clicks", "mouse"});
     }
 
     std::vector<Row> rows() override {
@@ -101,7 +101,7 @@ public:
                 result.push_back(Row{"CPS", std::to_string(tracker.left()), {}});
             }
             if (right) {
-                result.push_back(Row{"CPS D", std::to_string(tracker.right()), {}});
+                result.push_back(Row{"CPS R", std::to_string(tracker.right()), {}});
             }
         }
 
@@ -117,15 +117,15 @@ public:
 class ClockHud final : public TextHud {
 public:
     ClockHud()
-        : TextHud("clock", "Horloge", "Heure système, format configurable.",
+        : TextHud("clock", "Clock", "System time, in the format you choose.",
                   {0.99f, 0.02f}, HudAnchor::TopRight) {
         addTextSettings(false);
 
         settings.header("Format");
-        settings.dropdown("format", "Affichage", "24 h", {"24 h", "12 h", "Avec secondes"});
-        settings.toggle("showDate", "Afficher la date", false);
+        settings.dropdown("format", "Display", "24 h", {"24 h", "12 h", "With seconds"});
+        settings.toggle("showDate", "Show the date", false);
 
-        addKeywords({"heure", "horloge", "clock", "temps"});
+        addKeywords({"time", "clock"});
     }
 
     std::vector<Row> rows() override {
@@ -142,7 +142,7 @@ public:
             const int hour12 = tm.tm_hour % 12 == 0 ? 12 : tm.tm_hour % 12;
             std::snprintf(buffer, sizeof(buffer), "%d:%02d %s", hour12, tm.tm_min,
                           tm.tm_hour < 12 ? "AM" : "PM");
-        } else if (format == "Avec secondes") {
+        } else if (format == "With seconds") {
             std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d", tm.tm_hour, tm.tm_min,
                           tm.tm_sec);
         } else {
@@ -165,19 +165,19 @@ public:
 class CoordinatesHud final : public TextHud {
 public:
     CoordinatesHud()
-        : TextHud("coordinates", "Coordonnées", "Position, dimension et direction.",
+        : TextHud("coordinates", "Coordinates", "Position, dimension and facing.",
                   {0.01f, 0.97f}, HudAnchor::BottomLeft) {
         addTextSettings(true);
 
-        settings.header("Affichage");
-        settings.intSlider("decimals", "Décimales", 0, 0, 3);
-        settings.toggle("singleLine", "Sur une seule ligne", true);
-        settings.toggle("showNether", "Coordonnées du Nether", false,
-                        "Affiche l'équivalent divisé par 8.");
+        settings.header("Display");
+        settings.intSlider("decimals", "Decimals", 0, 0, 3);
+        settings.toggle("singleLine", "On a single line", true);
+        settings.toggle("showNether", "Nether coordinates", false,
+                        "Shows the value divided by 8.");
         settings.toggle("showDirection", "Direction", true);
-        settings.toggle("showChunk", "Position dans le chunk", false);
+        settings.toggle("showChunk", "Position in the chunk", false);
 
-        addKeywords({"coords", "coordonnées", "position", "xyz"});
+        addKeywords({"coords", "coordinates", "position", "xyz"});
     }
 
     bool relevantNow() const override { return sdk::game().player().valid; }
@@ -218,7 +218,7 @@ public:
         }
 
         if (settings.value<bool>("showDirection", true)) {
-            result.push_back(Row{"Face", sdk::Game::compass(player.yaw), {}});
+            result.push_back(Row{"Facing", sdk::Game::compass(player.yaw), {}});
         }
 
         return result;
@@ -228,15 +228,15 @@ public:
 class DirectionHud final : public TextHud {
 public:
     DirectionHud()
-        : TextHud("direction", "Direction", "Boussole textuelle.",
+        : TextHud("direction", "Direction", "A compass, in text.",
                   {0.5f, 0.03f}, HudAnchor::TopCenter) {
         addTextSettings(false);
 
-        settings.header("Affichage");
-        settings.toggle("longNames", "Noms complets", false);
-        settings.toggle("showDegrees", "Afficher les degrés", false);
+        settings.header("Display");
+        settings.toggle("longNames", "Full names", false);
+        settings.toggle("showDegrees", "Show degrees", false);
 
-        addKeywords({"boussole", "direction", "compass", "nord"});
+        addKeywords({"compass", "direction", "north"});
     }
 
     bool relevantNow() const override { return sdk::game().player().valid; }
@@ -260,21 +260,21 @@ public:
 class SpeedHud final : public TextHud {
 public:
     SpeedHud()
-        : TextHud("speed", "Vitesse", "Vitesse horizontale en blocs par seconde.",
+        : TextHud("speed", "Speed", "Horizontal speed in blocks per second.",
                   {0.01f, 0.14f}, HudAnchor::TopLeft) {
         addTextSettings(true);
 
-        settings.header("Unité");
-        settings.dropdown("unit", "Unité", "b/s", {"b/s", "km/h", "b/tick"});
-        settings.intSlider("decimals", "Décimales", 2, 0, 3);
+        settings.header("Unit");
+        settings.dropdown("unit", "Unit", "b/s", {"b/s", "km/h", "b/tick"});
+        settings.intSlider("decimals", "Decimals", 2, 0, 3);
 
-        addKeywords({"vitesse", "speed", "bps"});
+        addKeywords({"speed", "bps"});
     }
 
     bool relevantNow() const override { return sdk::game().player().valid; }
 
     std::vector<Row> rows() override {
-        if (!sdk::game().player().valid) return {Row{"Vitesse", kUnknown, {}}};
+        if (!sdk::game().player().valid) return {Row{"Speed", kUnknown, {}}};
 
         const float blocksPerSecond = sdk::game().horizontalSpeed();
         const std::string unit = settings.value<std::string>("unit", "b/s");
@@ -287,23 +287,23 @@ public:
             value = blocksPerSecond / 20.f;
         }
 
-        return {Row{"Vitesse", std::format("{} {}", strings::formatFloat(value, decimals), unit), {}}};
+        return {Row{"Speed", std::format("{} {}", strings::formatFloat(value, decimals), unit), {}}};
     }
 };
 
 class PingHud final : public TextHud {
 public:
     PingHud()
-        : TextHud("ping", "Ping", "Latence vers le serveur.",
+        : TextHud("ping", "Ping", "Latency to the server.",
                   {0.99f, 0.08f}, HudAnchor::TopRight) {
         addTextSettings(true);
 
-        settings.header("Seuils");
-        settings.toggle("colorThresholds", "Colorer selon la latence", true);
-        settings.intSlider("warnAbove", "Seuil orange", 100, 20, 500, "", " ms");
-        settings.intSlider("badAbove", "Seuil rouge", 200, 50, 1000, "", " ms");
+        settings.header("Thresholds");
+        settings.toggle("colorThresholds", "Colour by latency", true);
+        settings.intSlider("warnAbove", "Amber threshold", 100, 20, 500, "", " ms");
+        settings.intSlider("badAbove", "Red threshold", 200, 50, 1000, "", " ms");
 
-        addKeywords({"ping", "latence", "ms", "réseau"});
+        addKeywords({"ping", "latency", "ms", "network"});
     }
 
     bool relevantNow() const override { return sdk::game().world().multiplayer; }
@@ -331,14 +331,14 @@ public:
 class MemoryHud final : public TextHud {
 public:
     MemoryHud()
-        : TextHud("memory", "Mémoire", "Mémoire utilisée par le jeu.",
+        : TextHud("memory", "Memory", "Memory the game is using.",
                   {0.99f, 0.14f}, HudAnchor::TopRight) {
         addTextSettings(true);
 
-        settings.header("Affichage");
-        settings.dropdown("unit", "Unité", "MiB", {"MiB", "GiB"});
+        settings.header("Display");
+        settings.dropdown("unit", "Unit", "MiB", {"MiB", "GiB"});
 
-        addKeywords({"ram", "mémoire", "memory"});
+        addKeywords({"ram", "memory"});
     }
 
     std::vector<Row> rows() override {
@@ -362,10 +362,10 @@ public:
 class IpDisplayHud final : public TextHud {
 public:
     IpDisplayHud()
-        : TextHud("ip_display", "Adresse du serveur", "Serveur en cours, masquable pour le stream.",
+        : TextHud("ip_display", "Server address", "The server you are on, hideable for a stream.",
                   {0.5f, 0.97f}, HudAnchor::BottomCenter) {
         addTextSettings(false);
-        addKeywords({"ip", "serveur", "adresse", "server"});
+        addKeywords({"ip", "server", "address"});
     }
 
     bool relevantNow() const override { return sdk::game().world().multiplayer; }
@@ -381,14 +381,14 @@ public:
 class AfkTimerHud final : public TextHud {
 public:
     AfkTimerHud()
-        : TextHud("afk_timer", "Minuteur AFK", "Temps écoulé depuis la dernière action.",
+        : TextHud("afk_timer", "AFK timer", "Time since the last action.",
                   {0.5f, 0.1f}, HudAnchor::TopCenter) {
         addTextSettings(true);
 
-        settings.header("Déclenchement");
-        settings.intSlider("showAfter", "Afficher après", 30, 5, 600, "", " s");
+        settings.header("Trigger");
+        settings.intSlider("showAfter", "Show after", 30, 5, 600, "", " s");
 
-        addKeywords({"afk", "inactif", "idle"});
+        addKeywords({"afk", "idle"});
     }
 
     bool relevantNow() const override {
@@ -405,19 +405,19 @@ public:
 class SessionStatsHud final : public TextHud {
 public:
     SessionStatsHud()
-        : TextHud("session_stats", "Stats de session",
-                  "Durée, distance parcourue, éliminations et FPS moyen.",
+        : TextHud("session_stats", "Session stats",
+                  "Duration, distance travelled, kills and average FPS.",
                   {0.99f, 0.4f}, HudAnchor::MiddleRight) {
         addTextSettings(true);
 
-        settings.header("Lignes affichées");
-        settings.toggle("showTime", "Durée de jeu", true);
-        settings.toggle("showBlocks", "Blocs parcourus", true);
-        settings.toggle("showCombat", "Éliminations / morts", true);
-        settings.toggle("showFps", "FPS moyen", true);
-        settings.toggle("showClicks", "Clics totaux", false);
+        settings.header("Lines shown");
+        settings.toggle("showTime", "Playtime", true);
+        settings.toggle("showBlocks", "Blocks travelled", true);
+        settings.toggle("showCombat", "Kills / deaths", true);
+        settings.toggle("showFps", "Average FPS", true);
+        settings.toggle("showClicks", "Total clicks", false);
 
-        addKeywords({"stats", "session", "statistiques"});
+        addKeywords({"stats", "session"});
     }
 
     std::vector<Row> rows() override {
@@ -425,10 +425,10 @@ public:
         std::vector<Row> result;
 
         if (settings.value<bool>("showTime", true)) {
-            result.push_back(Row{"Durée", strings::formatDuration(stats.secondsPlayed()), {}});
+            result.push_back(Row{"Duration", strings::formatDuration(stats.secondsPlayed()), {}});
         }
         if (settings.value<bool>("showBlocks", true)) {
-            result.push_back(Row{"Blocs",
+            result.push_back(Row{"Blocks",
                                  strings::formatThousands(
                                      static_cast<long long>(stats.blocksTravelled())), {}});
         }
@@ -437,12 +437,12 @@ public:
         }
         if (settings.value<bool>("showFps", true)) {
             const float average = FrameStats::get().average();
-            result.push_back(Row{"FPS moy.",
+            result.push_back(Row{"Avg FPS",
                                  average > 0.f ? std::to_string(static_cast<int>(average))
                                                : kUnknown, {}});
         }
         if (settings.value<bool>("showClicks", false)) {
-            result.push_back(Row{"Clics",
+            result.push_back(Row{"Clicks",
                                  strings::formatThousands(ClickTracker::get().totalClicks()), {}});
         }
 
@@ -453,17 +453,17 @@ public:
 class StopwatchHud final : public TextHud {
 public:
     StopwatchHud()
-        : TextHud("stopwatch", "Chronomètre", "Chronomètre manuel pour l'entraînement.",
+        : TextHud("stopwatch", "Stopwatch", "A manual stopwatch for practice.",
                   {0.5f, 0.15f}, HudAnchor::TopCenter) {
         addTextSettings(false);
 
-        settings.header("Contrôles");
-        settings.keybind("toggleKey", "Démarrer / arrêter", Keybind{VK_F7});
-        settings.keybind("resetKey", "Réinitialiser", Keybind{VK_F7, false, true});
-        settings.toggle("showMilliseconds", "Millisecondes", true);
+        settings.header("Controls");
+        settings.keybind("toggleKey", "Start / stop", Keybind{VK_F7});
+        settings.keybind("resetKey", "Reset", Keybind{VK_F7, false, true});
+        settings.toggle("showMilliseconds", "Milliseconds", true);
 
         always(&StopwatchHud::onKey);
-        addKeywords({"chrono", "stopwatch", "timer", "entraînement"});
+        addKeywords({"stopwatch", "timer", "practice"});
     }
 
     std::vector<Row> rows() override {
@@ -521,19 +521,19 @@ private:
 class KeystrokesHud final : public HudModule {
 public:
     KeystrokesHud()
-        : HudModule("keystrokes", "Keystrokes", "Affiche les touches de déplacement et les clics.",
+        : HudModule("keystrokes", "Keystrokes", "Shows the movement keys and the clicks.",
                     {0.03f, 0.6f}, HudAnchor::MiddleLeft) {
-        settings.header("Disposition");
-        settings.slider("keySize", "Taille des touches", 30.f, 16.f, 60.f, "", "px");
-        settings.slider("gap", "Espacement", 3.f, 0.f, 12.f, "", "px");
-        settings.toggle("showMouse", "Boutons de souris", true);
-        settings.toggle("showSpace", "Barre d'espace", true);
-        settings.toggle("showCps", "CPS sur les boutons", true);
+        settings.header("Layout");
+        settings.slider("keySize", "Key size", 30.f, 16.f, 60.f, "", "px");
+        settings.slider("gap", "Spacing", 3.f, 0.f, 12.f, "", "px");
+        settings.toggle("showMouse", "Mouse buttons", true);
+        settings.toggle("showSpace", "Space bar", true);
+        settings.toggle("showCps", "CPS on the buttons", true);
 
-        settings.header("Couleurs");
-        settings.color("idleColor", "Touche relâchée", Color::rgb8(11, 31, 23, 170));
-        settings.color("pressedColor", "Touche pressée", palette::kMint);
-        settings.toggle("accentPressed", "Utiliser l'accent du thème", true);
+        settings.header("Colours");
+        settings.color("idleColor", "Key released", Color::rgb8(11, 31, 23, 170));
+        settings.color("pressedColor", "Key pressed", palette::kMint);
+        settings.toggle("accentPressed", "Use the theme's accent", true);
 
         if (Setting* pressed = settings.find("pressedColor")) {
             pressed->visibleWhen = [this] { return !settings.value<bool>("accentPressed", true); };
@@ -542,7 +542,7 @@ public:
             cps->visibleWhen = [this] { return settings.value<bool>("showMouse", true); };
         }
 
-        addKeywords({"touches", "keystrokes", "wasd", "clavier"});
+        addKeywords({"keys", "keystrokes", "wasd", "clavier"});
     }
 
     Vec2 contentSize(Renderer& renderer) override {
@@ -634,17 +634,17 @@ private:
 class FpsGraphHud final : public HudModule {
 public:
     FpsGraphHud()
-        : HudModule("fps_graph", "Graphique FPS",
-                    "Frametimes, freezes et 1% lows sur les dernières secondes.",
+        : HudModule("fps_graph", "FPS graph",
+                    "Frame times, freezes and 1% lows over the last few seconds.",
                     {0.99f, 0.97f}, HudAnchor::BottomRight) {
-        settings.header("Graphique");
-        settings.slider("width", "Largeur", 220.f, 80.f, 600.f, "", "px");
-        settings.slider("height", "Hauteur", 70.f, 30.f, 240.f, "", "px");
-        settings.intSlider("samples", "Échantillons", 180, 30, 512);
-        settings.toggle("fill", "Remplir sous la courbe", true);
-        settings.toggle("showTargetLine", "Ligne de référence", true);
-        settings.intSlider("target", "FPS cible", 60, 30, 360, "", " FPS");
-        settings.toggle("showLegend", "Légende chiffrée", true);
+        settings.header("Graph");
+        settings.slider("width", "Width", 220.f, 80.f, 600.f, "", "px");
+        settings.slider("height", "Height", 70.f, 30.f, 240.f, "", "px");
+        settings.intSlider("samples", "Samples", 180, 30, 512);
+        settings.toggle("fill", "Fill under the curve", true);
+        settings.toggle("showTargetLine", "Reference line", true);
+        settings.intSlider("target", "Target FPS", 60, 30, 360, "", " FPS");
+        settings.toggle("showLegend", "Numbered legend", true);
 
         addKeywords({"graphique", "graph", "frametime", "lows", "performance"});
     }
@@ -670,7 +670,7 @@ public:
             FontSpec spec = fontFor();
             spec.align = TextAlign::Center;
             spec.valign = TextVAlign::Middle;
-            renderer.text("Mesure en cours…", plot, textColor().fade(0.6f), spec);
+            renderer.text("Measuring…", plot, textColor().fade(0.6f), spec);
             return;
         }
 
@@ -727,18 +727,18 @@ public:
 class ServerMonitorHud final : public TextHud {
 public:
     ServerMonitorHud()
-        : TextHud("server_monitor", "Moniteur serveur",
-                  "Ping, TPS estimé, pertes de paquets et stabilité.",
+        : TextHud("server_monitor", "Server monitor",
+                  "Ping, estimated TPS, packet loss and stability.",
                   {0.99f, 0.2f}, HudAnchor::TopRight) {
         addTextSettings(true);
 
-        settings.header("Lignes affichées");
+        settings.header("Lines shown");
         settings.toggle("showPing", "Ping", true);
-        settings.toggle("showTps", "TPS estimé", true);
-        settings.toggle("showLoss", "Pertes de paquets", true);
-        settings.toggle("showStability", "Stabilité", true);
+        settings.toggle("showTps", "Estimated TPS", true);
+        settings.toggle("showLoss", "Packet loss", true);
+        settings.toggle("showStability", "Stability", true);
 
-        addKeywords({"tps", "serveur", "réseau", "lag", "paquets"});
+        addKeywords({"tps", "server", "network", "lag", "paquets"});
     }
 
     bool relevantNow() const override { return sdk::game().world().multiplayer; }
@@ -769,17 +769,17 @@ public:
         }
 
         if (settings.value<bool>("showLoss", true)) {
-            result.push_back(Row{"Pertes",
+            result.push_back(Row{"Loss",
                                  std::format("{} %", strings::formatFloat(world.packetLoss * 100.f, 1)),
                                  world.packetLoss > 0.02f ? active.danger : Color{}});
         }
 
         if (settings.value<bool>("showStability", true)) {
             const char* label = world.ping < 0.f            ? kUnknown
-                                : world.packetLoss > 0.05f  ? "Instable"
-                                : world.ping > 200.f        ? "Moyenne"
-                                                            : "Bonne";
-            result.push_back(Row{"Connexion", label, {}});
+                                : world.packetLoss > 0.05f  ? "Unstable"
+                                : world.ping > 200.f        ? "Average"
+                                                            : "Good";
+            result.push_back(Row{"Connection", label, {}});
         }
 
         return result;
@@ -789,16 +789,16 @@ public:
 class ArmourHud final : public TextHud {
 public:
     ArmourHud()
-        : TextHud("armour", "Armure", "Points d'armure et points de vie.",
+        : TextHud("armour", "Armour", "Armour points and health.",
                   {0.5f, 0.9f}, HudAnchor::BottomCenter) {
         addTextSettings(true);
 
-        settings.header("Lignes affichées");
-        settings.toggle("showHealth", "Points de vie", true);
-        settings.toggle("showArmour", "Points d'armure", true);
-        settings.toggle("showHunger", "Nourriture", false);
+        settings.header("Lines shown");
+        settings.toggle("showHealth", "Health", true);
+        settings.toggle("showArmour", "Armour points", true);
+        settings.toggle("showHunger", "Food", false);
 
-        addKeywords({"armure", "armor", "vie", "santé"});
+        addKeywords({"armour", "armor", "health"});
     }
 
     bool relevantNow() const override { return sdk::game().player().valid; }
@@ -807,7 +807,7 @@ public:
         const auto& player = sdk::game().player();
         const auto& active = theme();
 
-        if (!player.valid) return {Row{"Vie", kUnknown, {}}};
+        if (!player.valid) return {Row{"Health", kUnknown, {}}};
 
         std::vector<Row> result;
 
@@ -816,17 +816,17 @@ public:
             const Color color = ratio < 0.3f ? active.danger
                                 : ratio < 0.6f ? active.warning
                                                : Color{};
-            result.push_back(Row{"Vie",
+            result.push_back(Row{"Health",
                                  std::format("{:.0f} / {:.0f}", player.health, player.maxHealth),
                                  color});
         }
 
         if (settings.value<bool>("showArmour", true)) {
-            result.push_back(Row{"Armure", std::to_string(player.armourPoints), {}});
+            result.push_back(Row{"Armour", std::to_string(player.armourPoints), {}});
         }
 
         if (settings.value<bool>("showHunger", false)) {
-            result.push_back(Row{"Faim", std::format("{:.0f}", player.hunger), {}});
+            result.push_back(Row{"Hunger", std::format("{:.0f}", player.hunger), {}});
         }
 
         return result;

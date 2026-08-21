@@ -87,21 +87,21 @@ Matrix warmthMatrix(float amount) {
 }
 
 Matrix colourBlindMatrix(std::string_view kind) {
-    if (kind == "Protanopie") {
+    if (kind == "Protanopia") {
         return Matrix{0.567f, 0.558f, 0.f,    0,
                       0.433f, 0.442f, 0.242f, 0,
                       0.f,    0.f,    0.758f, 0,
                       0, 0, 0, 1,
                       0, 0, 0, 0};
     }
-    if (kind == "Deutéranopie") {
+    if (kind == "Deuteranopia") {
         return Matrix{0.625f, 0.70f, 0.f,   0,
                       0.375f, 0.30f, 0.30f, 0,
                       0.f,    0.f,   0.70f, 0,
                       0, 0, 0, 1,
                       0, 0, 0, 0};
     }
-    if (kind == "Tritanopie") {
+    if (kind == "Tritanopia") {
         return Matrix{0.95f, 0.f,    0.f,    0,
                       0.05f, 0.433f, 0.475f, 0,
                       0.f,   0.567f, 0.525f, 0,
@@ -114,17 +114,17 @@ Matrix colourBlindMatrix(std::string_view kind) {
 class PrivacyMode final : public Module {
 public:
     PrivacyMode()
-        : Module("privacy_mode", "Mode confidentialité", ModuleCategory::Utility,
-                 "Masque les informations qui vous identifient à l'écran.") {
-        settings.toggle("hideServer", "Masquer l'adresse du serveur", true);
-        settings.toggle("hideName", "Masquer le pseudo", true);
-        settings.toggle("hideCoordinates", "Masquer les coordonnées", false);
+        : Module("privacy_mode", "Privacy mode", ModuleCategory::Utility,
+                 "Hides what identifies you on screen.") {
+        settings.toggle("hideServer", "Hide the server address", true);
+        settings.toggle("hideName", "Hide the username", true);
+        settings.toggle("hideCoordinates", "Hide the coordinates", false);
 
         for (const char* id : {"hideServer", "hideName", "hideCoordinates"}) {
             settings.find(id)->onChange = [this] { apply(); };
         }
 
-        addKeywords({"vie privée", "privacy", "masquer", "anonyme"});
+        addKeywords({"privacy", "hide", "anonymous"});
     }
 
     void onEnable() override { apply(); }
@@ -150,14 +150,14 @@ private:
 class StreamerMode final : public Module {
 public:
     StreamerMode()
-        : Module("streamer_mode", "Mode streamer", ModuleCategory::Utility,
-                 "Masque tout ce qui est personnel et filtre le chat pendant un live.") {
-        settings.toggle("hideEverything", "Masquer serveur, pseudo et coordonnées", true);
-        settings.toggle("filterChat", "Filtrer le chat", true);
-        settings.toggle("censorInvites", "Censurer les adresses et invitations", true);
-        settings.toggle("quietNotifications", "Notifications discrètes", true);
-        settings.text("extraWords", "Mots à censurer",
-                      "Séparés par des virgules.");
+        : Module("streamer_mode", "Streamer mode", ModuleCategory::Utility,
+                 "Hides everything personal and filters the chat during a stream.") {
+        settings.toggle("hideEverything", "Hide server, username and coordinates", true);
+        settings.toggle("filterChat", "Filter the chat", true);
+        settings.toggle("censorInvites", "Censor addresses and invites", true);
+        settings.toggle("quietNotifications", "Quiet notifications", true);
+        settings.text("extraWords", "Words to censor",
+                      "Comma separated.");
 
         on(&StreamerMode::onChat, EventPriority::High);
         addKeywords({"stream", "streamer", "live", "twitch", "obs"});
@@ -172,7 +172,7 @@ public:
         privacy.hideCoordinates = everything;
         privacy.hideChat = settings.value<bool>("filterChat", true);
 
-        Notifications::info("Mode streamer actif", "Les informations personnelles sont masquées.");
+        Notifications::info("Streamer mode on", "Personal details are hidden.");
     }
 
     void onDisable() override {
@@ -188,7 +188,7 @@ private:
         if (!settings.value<bool>("filterChat", true)) return;
 
         if (settings.value<bool>("censorInvites", true) && looksLikeAddress(event.message)) {
-            event.message = "[adresse masquée]";
+            event.message = "[address hidden]";
             return;
         }
 
@@ -222,25 +222,25 @@ private:
 class PerformanceMode final : public Module {
 public:
     PerformanceMode()
-        : Module("performance_mode", "Mode performance", ModuleCategory::Utility,
-                 "Coupe automatiquement les effets coûteux quand le framerate chute.") {
-        settings.dropdown("trigger", "Déclenchement", "Automatique",
-                          {"Automatique", "Toujours actif"});
-        settings.intSlider("dropBelow", "Activer sous", 55, 20, 240, "", " FPS");
-        settings.intSlider("restoreAbove", "Rétablir au-dessus de", 75, 25, 300, "", " FPS");
-        settings.toggle("disableBlur", "Désactiver le flou", true);
-        settings.toggle("disableShadows", "Désactiver les ombres", true);
-        settings.toggle("reduceAnimations", "Réduire les animations", false);
-        settings.toggle("notify", "Prévenir lors du basculement", true);
+        : Module("performance_mode", "Performance mode", ModuleCategory::Utility,
+                 "Cuts the expensive effects on its own when the framerate drops.") {
+        settings.dropdown("trigger", "Trigger", "Automatic",
+                          {"Automatic", "Always on"});
+        settings.intSlider("dropBelow", "Enable below", 55, 20, 240, "", " FPS");
+        settings.intSlider("restoreAbove", "Restore above", 75, 25, 300, "", " FPS");
+        settings.toggle("disableBlur", "Disable blur", true);
+        settings.toggle("disableShadows", "Disable shadows", true);
+        settings.toggle("reduceAnimations", "Reduce animation", false);
+        settings.toggle("notify", "Warn when it switches", true);
 
         const auto automatic = [this] {
-            return settings.value<std::string>("trigger", "Automatique") == "Automatique";
+            return settings.value<std::string>("trigger", "Automatic") == "Automatic";
         };
         settings.find("dropBelow")->visibleWhen = automatic;
         settings.find("restoreAbove")->visibleWhen = automatic;
 
         on(&PerformanceMode::onFrame);
-        addKeywords({"performance", "fps", "optimisation", "effets"});
+        addKeywords({"performance", "fps", "optimisation", "effects"});
     }
 
     void onEnable() override { engaged_ = false; }
@@ -252,7 +252,7 @@ public:
 private:
     void onFrame(FrameEvent& event) {
         const bool always =
-            settings.value<std::string>("trigger", "Automatique") == "Toujours actif";
+            settings.value<std::string>("trigger", "Automatic") == "Always on";
         const float fps = Velyx::get().fps();
 
         bool wanted = engaged_;
@@ -290,7 +290,7 @@ private:
         engaged_ = true;
 
         if (settings.value<bool>("notify", true)) {
-            Notifications::warning("Mode performance", "Effets réduits pour récupérer du framerate.");
+            Notifications::warning("Performance mode", "Effects cut back to win framerate.");
         }
     }
 
@@ -306,7 +306,7 @@ private:
         engaged_ = false;
 
         if (settings.value<bool>("notify", true)) {
-            Notifications::success("Mode performance", "Effets rétablis.");
+            Notifications::success("Performance mode", "Effects restored.");
         }
     }
 
@@ -319,15 +319,15 @@ private:
 class BatteryMode final : public Module {
 public:
     BatteryMode()
-        : Module("battery_mode", "Mode batterie", ModuleCategory::Utility,
-                 "Limite le framerate et les effets quand le portable est débranché.") {
-        settings.toggle("autoDetect", "Détecter le secteur automatiquement", true);
-        settings.intSlider("limit", "Limite de framerate", 60, 20, 144, "", " FPS");
-        settings.toggle("cutEffects", "Couper flou et ombres", true);
-        settings.toggle("notify", "Prévenir au changement d'alimentation", true);
+        : Module("battery_mode", "Battery mode", ModuleCategory::Utility,
+                 "Caps the framerate and the effects when the laptop is unplugged.") {
+        settings.toggle("autoDetect", "Detect mains power automatically", true);
+        settings.intSlider("limit", "Framerate cap", 60, 20, 144, "", " FPS");
+        settings.toggle("cutEffects", "Cut blur and shadows", true);
+        settings.toggle("notify", "Warn when the power source changes", true);
 
         on(&BatteryMode::onFrame);
-        addKeywords({"batterie", "portable", "économie", "autonomie"});
+        addKeywords({"battery", "laptop", "saving", "battery life"});
     }
 
     void onDisable() override { throttling_ = false; }
@@ -354,9 +354,9 @@ private:
             }
 
             if (settings.value<bool>("notify", true)) {
-                Notifications::info(onBattery ? "Sur batterie" : "Sur secteur",
-                                    onBattery ? "Framerate limité pour économiser l'autonomie."
-                                              : "Limitation levée.");
+                Notifications::info(onBattery ? "On battery" : "On mains",
+                                    onBattery ? "Framerate capped to save battery."
+                                              : "Cap lifted.");
             }
         }
 
@@ -388,19 +388,19 @@ private:
 class AccessibilityMode final : public Module {
 public:
     AccessibilityMode()
-        : Module("accessibility", "Mode accessibilité", ModuleCategory::Utility,
-                 "Texte plus grand, contours marqués, animations réduites.") {
-        settings.toggle("applyTheme", "Basculer sur le thème Contrast", true);
-        settings.slider("textScale", "Échelle du texte", 1.2f, 1.f, 2.f, "", "x");
-        settings.toggle("stopAnimations", "Supprimer les animations", true);
-        settings.toggle("thickBorders", "Bordures épaisses", true);
-        settings.toggle("noBlur", "Supprimer le flou", true);
+        : Module("accessibility", "Accessibility mode", ModuleCategory::Utility,
+                 "Larger text, stronger outlines, less animation.") {
+        settings.toggle("applyTheme", "Switch to the Contrast theme", true);
+        settings.slider("textScale", "Text scale", 1.2f, 1.f, 2.f, "", "x");
+        settings.toggle("stopAnimations", "Remove the animation", true);
+        settings.toggle("thickBorders", "Thick borders", true);
+        settings.toggle("noBlur", "Remove the blur", true);
 
         for (const char* id : {"textScale", "stopAnimations", "thickBorders", "noBlur"}) {
             settings.find(id)->onChange = [this] { apply(); };
         }
 
-        addKeywords({"accessibilité", "lisible", "contraste", "daltonien"});
+        addKeywords({"accessibility", "readable", "contrast", "colour blind"});
     }
 
     void onEnable() override {
@@ -414,7 +414,7 @@ public:
         if (settings.value<bool>("applyTheme", true)) ThemeManager::get().apply("Contrast");
         apply();
 
-        Notifications::info("Mode accessibilité actif");
+        Notifications::info("Accessibility mode on");
     }
 
     void onDisable() override {
@@ -453,17 +453,17 @@ private:
 class ScreenFilters final : public Module {
 public:
     ScreenFilters()
-        : Module("screen_filters", "Filtres d'écran", ModuleCategory::Render,
-                 "Filtre nuit, contraste, saturation et aides pour daltoniens.") {
-        settings.slider("nightShift", "Filtre nuit", 0.f, 0.f, 1.f);
+        : Module("screen_filters", "Screen filters", ModuleCategory::Render,
+                 "Night filter, contrast, saturation and colour blindness aids.") {
+        settings.slider("nightShift", "Night filter", 0.f, 0.f, 1.f);
         settings.slider("saturation", "Saturation", 1.f, 0.f, 2.f, "", "x");
-        settings.slider("contrast", "Contraste", 1.f, 0.5f, 1.8f, "", "x");
-        settings.dropdown("colourBlind", "Aide daltonisme", "Aucune",
-                          {"Aucune", "Protanopie", "Deutéranopie", "Tritanopie"});
-        settings.toggle("skipMenus", "Ne pas filtrer les menus du client", true);
+        settings.slider("contrast", "Contrast", 1.f, 0.5f, 1.8f, "", "x");
+        settings.dropdown("colourBlind", "Colour blindness aid", "None",
+                          {"None", "Protanopia", "Deuteranopia", "Tritanopia"});
+        settings.toggle("skipMenus", "Leave the client's own menus unfiltered", true);
 
         on(&ScreenFilters::onRender, EventPriority::Low);
-        addKeywords({"filtre", "nuit", "saturation", "contraste", "daltonien", "gamma"});
+        addKeywords({"filter", "night", "saturation", "contrast", "colour blind", "gamma"});
     }
 
 private:
@@ -471,10 +471,10 @@ private:
         const float night = settings.value<float>("nightShift", 0.f);
         const float saturation = settings.value<float>("saturation", 1.f);
         const float contrast = settings.value<float>("contrast", 1.f);
-        const std::string colourBlind = settings.value<std::string>("colourBlind", "Aucune");
+        const std::string colourBlind = settings.value<std::string>("colourBlind", "None");
 
         const bool neutral = night <= 0.001f && std::abs(saturation - 1.f) <= 0.001f &&
-                             std::abs(contrast - 1.f) <= 0.001f && colourBlind == "Aucune";
+                             std::abs(contrast - 1.f) <= 0.001f && colourBlind == "None";
         if (neutral) return;
         if (event.guiOpen && settings.value<bool>("skipMenus", true)) return;
 
@@ -482,7 +482,7 @@ private:
         if (std::abs(saturation - 1.f) > 0.001f) matrix = multiply(matrix, saturationMatrix(saturation));
         if (std::abs(contrast - 1.f) > 0.001f) matrix = multiply(matrix, contrastMatrix(contrast));
         if (night > 0.001f) matrix = multiply(matrix, warmthMatrix(night));
-        if (colourBlind != "Aucune") matrix = multiply(matrix, colourBlindMatrix(colourBlind));
+        if (colourBlind != "None") matrix = multiply(matrix, colourBlindMatrix(colourBlind));
 
         event.renderer->colorMatrix(
             Rect::fromSize(0.f, 0.f, event.screenSize.x, event.screenSize.y), matrix.data());
@@ -492,17 +492,17 @@ private:
 class ScreenshotMode final : public Module {
 public:
     ScreenshotMode()
-        : Module("screenshot_mode", "Mode capture", ModuleCategory::Utility,
-                 "Masque le HUD marqué, capture l'écran et range l'image par serveur et par date.") {
+        : Module("screenshot_mode", "Capture mode", ModuleCategory::Utility,
+                 "Hides the marked HUD, captures the screen and files the image by server and date.") {
         markEssential();
         mutablePermissions().files = true;
 
-        settings.keybind("captureKey", "Touche de capture", Keybind{VK_F2, false, false, false,
+        settings.keybind("captureKey", "Capture key", Keybind{VK_F2, false, false, false,
                                                                     Keybind::Mode::Once});
-        settings.toggle("hideHud", "Masquer les éléments marqués", true);
-        settings.toggle("hideClientUi", "Masquer le menu et les notifications", true);
-        settings.toggle("notify", "Confirmer par une notification", true);
-        settings.toggle("openFolder", "Ouvrir le dossier après la capture", false);
+        settings.toggle("hideHud", "Hide the marked elements", true);
+        settings.toggle("hideClientUi", "Hide the menu and the notifications", true);
+        settings.toggle("notify", "Confirm with a notification", true);
+        settings.toggle("openFolder", "Open the folder after a capture", false);
 
         always(&ScreenshotMode::onKey);
         always(&ScreenshotMode::onCapture, EventPriority::Last);
@@ -545,13 +545,13 @@ private:
         if (!settings.value<bool>("notify", true)) return;
 
         if (result.ok) {
-            Notifications::success("Capture enregistrée",
+            Notifications::success("Screenshot saved",
                                    result.path.filename().string());
             if (settings.value<bool>("openFolder", false)) {
                 screenshot::revealInExplorer(result.path);
             }
         } else {
-            Notifications::error("Capture impossible", result.error);
+            Notifications::error("Capture failed", result.error);
         }
     }
 
@@ -562,14 +562,14 @@ class Benchmark final : public Module {
 public:
     Benchmark()
         : Module("benchmark", "Benchmark", ModuleCategory::Utility,
-                 "Mesure la performance quelques secondes et propose des réglages adaptés.") {
-        settings.intSlider("duration", "Durée de la mesure", 20, 5, 120, "", " s");
-        settings.toggle("applySuggestion", "Appliquer automatiquement la suggestion", false);
+                 "Measures performance for a few seconds and suggests settings to match.") {
+        settings.intSlider("duration", "Measurement length", 20, 5, 120, "", " s");
+        settings.toggle("applySuggestion", "Apply the suggestion automatically", false);
 
         on(&Benchmark::onFrame);
         on(&Benchmark::onRender);
 
-        addKeywords({"benchmark", "test", "mesure", "performance"});
+        addKeywords({"benchmark", "test", "measure", "performance"});
     }
 
     void onEnable() override {
@@ -598,19 +598,19 @@ private:
 
         std::string verdict;
         if (average >= 200.f && low >= 120.f) {
-            verdict = "Machine confortable : tous les effets peuvent rester actifs.";
+            verdict = "A comfortable machine: every effect can stay on.";
         } else if (average >= 120.f && low >= 60.f) {
-            verdict = "Bon équilibre : gardez le flou, surveillez le nombre d'éléments de HUD.";
+            verdict = "A good balance: keep the blur, watch how many HUD elements you run.";
         } else if (average >= 60.f) {
-            verdict = "Serré : coupez le flou et les ombres via le mode performance.";
+            verdict = "Tight: cut the blur and the shadows with performance mode.";
             applyIfAsked(false, true);
         } else {
-            verdict = "Limité : mode performance conseillé en permanence.";
+            verdict = "Tight: performance mode is worth leaving on.";
             applyIfAsked(false, false);
         }
 
         Notifications::push(NotificationKind::Info,
-                            std::format("Benchmark : {} FPS moyens, {} en 1 %",
+                            std::format("Benchmark: {} FPS on average, {} at 1%",
                                         static_cast<int>(average), static_cast<int>(low)),
                             verdict, 12.f);
     }
@@ -662,17 +662,17 @@ private:
 class PlaytimeHud final : public TextHud {
 public:
     PlaytimeHud()
-        : TextHud("playtime", "Temps de jeu", "Aujourd'hui, cette semaine et au total.",
+        : TextHud("playtime", "Playtime", "Today, this week and all time.",
                   {0.99f, 0.6f}, HudAnchor::MiddleRight) {
         addTextSettings(true);
 
-        settings.header("Lignes affichées");
-        settings.toggle("showToday", "Aujourd'hui", true);
-        settings.toggle("showWeek", "Cette semaine", true);
+        settings.header("Lines shown");
+        settings.toggle("showToday", "Today", true);
+        settings.toggle("showWeek", "This week", true);
         settings.toggle("showTotal", "Total", false);
-        settings.toggle("includeCurrent", "Inclure la session en cours", true);
+        settings.toggle("includeCurrent", "Include the current session", true);
 
-        addKeywords({"temps", "playtime", "heures", "statistiques"});
+        addKeywords({"time", "playtime", "hours", "stats"});
     }
 
     std::vector<Row> rows() override {
@@ -683,10 +683,10 @@ public:
         std::vector<Row> result;
 
         if (settings.value<bool>("showToday", true)) {
-            result.push_back(Row{"Aujourd'hui", strings::formatDuration(tracker.today() + live), {}});
+            result.push_back(Row{"Today", strings::formatDuration(tracker.today() + live), {}});
         }
         if (settings.value<bool>("showWeek", true)) {
-            result.push_back(Row{"7 jours", strings::formatDuration(tracker.thisWeek() + live), {}});
+            result.push_back(Row{"7 days", strings::formatDuration(tracker.thisWeek() + live), {}});
         }
         if (settings.value<bool>("showTotal", false)) {
             result.push_back(Row{"Total", strings::formatDuration(tracker.total() + live), {}});
@@ -699,19 +699,19 @@ public:
 class CustomHitColor final : public Module {
 public:
     CustomHitColor()
-        : Module("custom_hit_color", "Couleur de coup", ModuleCategory::Render,
-                 "Change la couleur d'un joueur touché. Purement visuel, côté client.") {
-        settings.color("color", "Couleur", Color::rgb8(61, 220, 132, 130));
-        settings.toggle("useThemeAccent", "Utiliser l'accent du thème", false);
-        settings.slider("intensity", "Intensité", 0.6f, 0.f, 1.f);
-        settings.toggle("selfOnly", "Uniquement sur vos coups", false);
+        : Module("custom_hit_color", "Hit colour", ModuleCategory::Render,
+                 "Tints a player you hit. Purely visual, client side.") {
+        settings.color("color", "Colour", Color::rgb8(61, 220, 132, 130));
+        settings.toggle("useThemeAccent", "Use the theme's accent", false);
+        settings.slider("intensity", "Strength", 0.6f, 0.f, 1.f);
+        settings.toggle("selfOnly", "Only on your own hits", false);
 
         settings.find("color")->visibleWhen = [this] {
             return !settings.value<bool>("useThemeAccent", false);
         };
 
         on(&CustomHitColor::onActorHurt);
-        addKeywords({"couleur", "coup", "hit", "hurt"});
+        addKeywords({"colour", "hit", "hurt"});
     }
 
 private:
@@ -727,12 +727,12 @@ private:
 class CustomDamageTint final : public Module {
 public:
     CustomDamageTint()
-        : Module("damage_tint", "Teinte de dégâts", ModuleCategory::Render,
-                 "Remplace le voile rouge quand vous prenez des dégâts.") {
-        settings.color("color", "Couleur", Color::rgb8(232, 96, 82, 90));
-        settings.slider("intensity", "Intensité", 0.5f, 0.f, 1.f);
-        settings.toggle("scaleWithDamage", "Intensité selon les dégâts", true);
-        settings.toggle("disable", "Supprimer complètement le voile", false);
+        : Module("damage_tint", "Damage tint", ModuleCategory::Render,
+                 "Replaces the red overlay when you take damage.") {
+        settings.color("color", "Colour", Color::rgb8(232, 96, 82, 90));
+        settings.slider("intensity", "Strength", 0.5f, 0.f, 1.f);
+        settings.toggle("scaleWithDamage", "Scale with damage", true);
+        settings.toggle("disable", "Remove the overlay entirely", false);
 
         const auto visible = [this] { return !settings.value<bool>("disable", false); };
         settings.find("color")->visibleWhen = visible;
@@ -740,7 +740,7 @@ public:
         settings.find("scaleWithDamage")->visibleWhen = visible;
 
         on(&CustomDamageTint::onHurt);
-        addKeywords({"dégâts", "damage", "rouge", "teinte"});
+        addKeywords({"damage", "red", "tint"});
     }
 
 private:
@@ -765,17 +765,17 @@ private:
 class ClipMarkers final : public Module {
 public:
     ClipMarkers()
-        : Module("clip_markers", "Marqueurs", ModuleCategory::Utility,
-                 "Pose un repère horodaté pour retrouver un moment dans un enregistrement.") {
+        : Module("clip_markers", "Markers", ModuleCategory::Utility,
+                 "Drops a timestamped marker to find a moment in a recording.") {
         mutablePermissions().files = true;
 
-        settings.keybind("markKey", "Poser un marqueur",
+        settings.keybind("markKey", "Drop a marker",
                          Keybind{VK_F8, false, false, false, Keybind::Mode::Once});
-        settings.toggle("notify", "Confirmer par une notification", true);
-        settings.toggle("countInSession", "Afficher le total de la session", true);
+        settings.toggle("notify", "Confirm with a notification", true);
+        settings.toggle("countInSession", "Show the session total", true);
 
         always(&ClipMarkers::onKey);
-        addKeywords({"marqueur", "clip", "repère", "moment"});
+        addKeywords({"marker", "clip", "moment"});
     }
 
     void onEnable() override { mark(); }
@@ -799,10 +799,10 @@ private:
 
         const std::string body =
             settings.value<bool>("countInSession", true)
-                ? std::format("{} depuis le début de la session", thisSession_)
+                ? std::format("{} since the session started", thisSession_)
                 : std::string{};
 
-        Notifications::success(std::format("Marqueur à {}",
+        Notifications::success(std::format("Marker at {}",
                                            strings::formatDuration(marker.sessionSeconds)),
                                body);
     }

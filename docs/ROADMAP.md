@@ -20,7 +20,8 @@ goes.
 | Settings search | ✅ | `ModuleManager::search`, matches modules **and** settings |
 | Favourite modules | ✅ | `Module::setFavourite`, Favourites page |
 | Keybind manager | ✅ | Keybinds page, with toggle / hold / press modes |
-| Command palette (Ctrl+K) | ✅ | `dll/ui/CommandPalette.*`, extensible via `registerCommand` |
+| Menu search (Ctrl+K) | ✅ | Opens the menu on its search field, over modules **and** settings |
+| Translations | ✅ | English in the source, `assets/lang/<code>.json` for the rest |
 | Module permissions | ✅ | `ModulePermissions`, shown before you enable anything |
 | Safe mode | ✅ | Two crashes in a row disables everything non-essential |
 | Onboarding | ✅ | `dll/ui/Onboarding.*`, five steps, presets per play style |
@@ -111,7 +112,7 @@ goes.
 
 ## The module catalogue
 
-45 modules are written. Most of what is left falls into three buckets:
+44 modules are written. Most of what is left falls into three buckets:
 
 - **HUD readouts**, which are twenty line `TextHud` subclasses. That is filling
   in, not design work;

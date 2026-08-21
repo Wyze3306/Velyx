@@ -56,7 +56,7 @@ Present (detour)
        ├─ emit FrameEvent                SDK, services, animations
        ├─ GraphicsContext::beginFrame()  acquires the back buffer
        │    ├─ emit RenderEvent          HUD elements
-       │    └─ emit RenderTopEvent       menu, notifications, palette
+       │    └─ emit RenderTopEvent       menu, HUD editor, notifications
        └─ GraphicsContext::endFrame()    presents and flushes
 ```
 
@@ -145,17 +145,20 @@ they all line up to the pixel when stacked.
 
 Settings are described `std::variant`s (label, range, unit, visibility
 condition, keywords). That single description drives the menu, the JSON round
-trip, the search and the command palette, so there is no second list to keep in
-sync.
+trip and the search, so there is no second list to keep in sync.
 
 ## Profiles
 
-A profile holds every module's state and settings, the HUD layout and the theme.
-Switching disables everything and reloads, so no state leaks between profiles.
+A profile holds every module's state and settings, and the HUD layout. It does not
+hold the theme or the interfaces' own settings: those live in `config/client.json`
+and stay put whichever profile is active. Switching disables everything and reloads,
+so no state leaks between profiles — everything except the interfaces, whose being on
+screen is session state and never travels in a profile.
 
-* **Automatic switching**: each profile declares substrings matched against the
-  address and name of the server you join. Longest match wins, otherwise the
-  default profile applies.
+* **Automatic switching**: a profile can declare substrings matched against the
+  address and name of the server you join. Longest match wins; when nothing
+  matches, the profile you chose stays. None of the profiles Velyx ships with
+  declares any, so this only ever does what you asked it to.
 * **Versioning**: every switch, import or reset writes a restore point into
   `profiles/<name>/versions/` first. Twenty are kept.
 * **Sharing**: `VELYX1:<base64 json>`, one line, safe to paste into a chat.

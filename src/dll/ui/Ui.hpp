@@ -92,6 +92,10 @@ public:
     bool textField(const UiId& id, const Rect& rect, std::string& value,
                    std::string_view placeholder = {}, size_t maxLength = 64);
 
+    // Puts the caret in a text field nothing has been clicked in yet — what opening
+    // the menu straight on its search field needs.
+    void focusText(const UiId& id);
+
     bool colorPicker(const UiId& id, const Rect& rect, Color& value, bool withAlpha = true);
 
     bool colorRow(const UiId& id, const Rect& rect, std::string_view label, Color& value);

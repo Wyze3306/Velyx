@@ -13,7 +13,6 @@ namespace velyx {
 struct Profile {
     std::string name;
     std::string description;
-    std::string theme = "Velyx";
 
     std::vector<std::string> serverMatches;
 
@@ -37,6 +36,10 @@ public:
     void load();
 
     void saveCurrent();
+
+    // The interfaces' own settings, saved beside the configuration rather than in a
+    // profile. Called when a profile is written and when the client shuts down.
+    static void saveInterfaceState();
 
     bool switchTo(const std::string& name, bool automatic = false);
 
@@ -73,6 +76,7 @@ private:
     ProfileManager() = default;
 
     void createStarterProfiles();
+    void dropShippedServerProfiles();
     [[nodiscard]] nlohmann::json serializeCurrent() const;
     void applyDocument(const nlohmann::json& document);
     [[nodiscard]] std::filesystem::path fileFor(const std::string& name) const;

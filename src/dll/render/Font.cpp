@@ -1,6 +1,7 @@
 #include "Font.hpp"
 
 #include <algorithm>
+#include <optional>
 
 #include "core/Log.hpp"
 #include "core/Strings.hpp"
@@ -13,9 +14,6 @@ constexpr const char* kLog = "Font";
 const char* kFallbackFamilies[] = {"Space Grotesk", "Segoe UI Variable Text", "Segoe UI", "Arial"};
 
 DWRITE_FONT_WEIGHT toDWrite(FontWeight weight) {
-    // The bundled family ships Regular, Medium and Bold. Asking for 600 would
-    // resolve upward to Bold and make every label heavier than designed.
-    if (weight == FontWeight::SemiBold) return DWRITE_FONT_WEIGHT_MEDIUM;
     return static_cast<DWRITE_FONT_WEIGHT>(static_cast<int>(weight));
 }
 
@@ -80,6 +78,8 @@ bool FontManager::initialize(IDWriteFactory5* factory) {
     formats_.clear();
     layouts_.clear();
     layoutOrder_.clear();
+    resolved_.clear();
+    systemCollection_.reset();
 
     if (FAILED(factory_->CreateFontSetBuilder(setBuilder_.put()))) {
         Log::warn(kLog, "bundled fonts unavailable");
@@ -93,6 +93,8 @@ void FontManager::shutdown() {
     layouts_.clear();
     layoutOrder_.clear();
     formats_.clear();
+    resolved_.clear();
+    systemCollection_.reset();
     collection_.reset();
     setBuilder_.reset();
     factory_.reset();
@@ -177,7 +179,10 @@ void FontManager::rebuildCollection() {
     }
 
     formats_.clear();
+    resolved_.clear();
     invalidate();
+
+    Log::info(kLog, "bundled families: {}", strings::join(bundledFamilies_, ", "));
 }
 
 std::vector<std::string> FontManager::availableFamilies() const {
@@ -214,6 +219,62 @@ std::vector<std::string> FontManager::availableFamilies() const {
     return families;
 }
 
+IDWriteFontCollection* FontManager::systemCollection() {
+    if (!systemCollection_ && factory_) {
+
+        // IDWriteFactory3 hides the one-collection overload behind a wider one, so the
+        // call is made through the base interface.
+        auto* base = static_cast<IDWriteFactory*>(factory_.get());
+        base->GetSystemFontCollection(systemCollection_.put(), FALSE);
+    }
+    return systemCollection_.get();
+}
+
+namespace {
+
+bool collectionHas(IDWriteFontCollection* collection, const std::wstring& family) {
+    if (!collection || family.empty()) return false;
+
+    UINT32 index = 0;
+    BOOL found = FALSE;
+    return SUCCEEDED(collection->FindFamilyName(family.c_str(), &index, &found)) && found;
+}
+
+}
+
+// CreateTextFormat accepts a family nothing can draw: it reports success and the text
+// comes out in whatever DirectWrite falls back to, which is how a mistyped or missing
+// family used to turn the whole interface into Tahoma without a word in the log. The
+// family is therefore looked up before it is asked for.
+const FontManager::ResolvedFamily& FontManager::resolve(const std::string& family) {
+    if (const auto it = resolved_.find(family); it != resolved_.end()) return it->second;
+
+    const auto lookup = [&](const std::string& candidate) -> std::optional<ResolvedFamily> {
+        const std::wstring wide = strings::toUtf16(candidate);
+        if (collectionHas(collection_.get(), wide)) return ResolvedFamily{wide, collection_.get()};
+        if (collectionHas(systemCollection(), wide)) return ResolvedFamily{wide, nullptr};
+        return std::nullopt;
+    };
+
+    const auto remember = [&](ResolvedFamily value) -> const ResolvedFamily& {
+        return resolved_.emplace(family, std::move(value)).first->second;
+    };
+
+    if (const auto direct = lookup(family)) return remember(*direct);
+
+    for (const char* candidate : kFallbackFamilies) {
+        const auto fallback = lookup(candidate);
+        if (!fallback) continue;
+
+        Log::warn(kLog, "no font family '{}' anywhere, drawing in '{}' instead", family, candidate);
+        return remember(*fallback);
+    }
+
+    Log::warn(kLog, "no font family '{}' and no fallback available; DirectWrite will choose",
+              family);
+    return remember(ResolvedFamily{strings::toUtf16(family), nullptr});
+}
+
 IDWriteTextFormat* FontManager::format(const FontSpec& spec) {
     if (!factory_) return nullptr;
 
@@ -222,25 +283,13 @@ IDWriteTextFormat* FontManager::format(const FontSpec& spec) {
 
     if (const auto it = formats_.find(key); it != formats_.end()) return it->second.get();
 
-    ComPtr<IDWriteTextFormat> format;
-    const std::wstring family = strings::toUtf16(spec.family);
+    const ResolvedFamily& resolved = resolve(spec.family);
 
-    HRESULT hr = factory_->CreateTextFormat(
-        family.c_str(), collection_.get(), toDWrite(spec.weight),
+    ComPtr<IDWriteTextFormat> format;
+    const HRESULT hr = factory_->CreateTextFormat(
+        resolved.name.c_str(), resolved.collection, toDWrite(spec.weight),
         spec.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, spec.size, L"", format.put());
-
-    if (FAILED(hr)) {
-        for (const char* fallback : kFallbackFamilies) {
-            const std::wstring wide = strings::toUtf16(fallback);
-            hr = factory_->CreateTextFormat(wide.c_str(), nullptr, toDWrite(spec.weight),
-                                            spec.italic ? DWRITE_FONT_STYLE_ITALIC
-                                                        : DWRITE_FONT_STYLE_NORMAL,
-                                            DWRITE_FONT_STRETCH_NORMAL, spec.size, L"",
-                                            format.put());
-            if (SUCCEEDED(hr)) break;
-        }
-    }
 
     if (FAILED(hr) || !format) {
         Log::error(kLog, "no usable font for family '{}'", spec.family);

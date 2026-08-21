@@ -8,8 +8,8 @@
 #include "core/Log.hpp"
 #include "core/Paths.hpp"
 #include "core/Strings.hpp"
+#include "dll/config/ClientConfig.hpp"
 #include "dll/module/ModuleManager.hpp"
-#include "dll/ui/Theme.hpp"
 
 namespace velyx {
 namespace {
@@ -69,7 +69,6 @@ Profile profileFromJson(const nlohmann::json& json, const std::string& fallbackN
     Profile profile;
     profile.name = json.value("name", fallbackName);
     profile.description = json.value("description", std::string{});
-    profile.theme = json.value("theme", std::string("Velyx"));
     profile.autoSwitch = json.value("autoSwitch", true);
     profile.isDefault = json.value("isDefault", false);
     profile.modifiedAt = json.value("modifiedAt", 0LL);
@@ -87,7 +86,6 @@ nlohmann::json profileToJson(const Profile& profile) {
     nlohmann::json json;
     json["name"] = profile.name;
     json["description"] = profile.description;
-    json["theme"] = profile.theme;
     json["autoSwitch"] = profile.autoSwitch;
     json["isDefault"] = profile.isDefault;
     json["modifiedAt"] = profile.modifiedAt;
@@ -127,16 +125,16 @@ std::string ProfileManager::uniqueName(const std::string& wanted) const {
 
 void ProfileManager::createStarterProfiles() {
 
+    // Contexts, not servers: a profile that names one is out of date the day that
+    // server changes, and Velyx has no business shipping a list of them.
     const std::vector<Profile> starters{
-        Profile{"Global", "Profil par défaut, utilisé quand aucun autre ne correspond.", "Velyx",
+        Profile{"Global", "The default profile, used when no other one is picked.",
                 {}, false, true, nowMs()},
-        Profile{"Hive", "HUD compact et stats orientées Hive.", "Nuit",
-                {"hive", "hivebedrock"}, true, false, nowMs()},
-        Profile{"CubeCraft", "Réglages pour CubeCraft.", "Velyx",
-                {"cubecraft", "cubecraft.net"}, true, false, nowMs()},
-        Profile{"PvP", "Latence minimale, effets réduits, HUD lisible.", "Nuit",
-                {"zeqa", "pvp", "duels"}, true, false, nowMs()},
-        Profile{"Survie", "HUD complet : coordonnées, boussole, waypoints.", "Velyx",
+        Profile{"PvP", "Minimal latency, effects cut back, a readable HUD.",
+                {}, false, false, nowMs()},
+        Profile{"Performance", "The bare minimum on screen, everything else off.",
+                {}, false, false, nowMs()},
+        Profile{"Survival", "The full HUD: coordinates, compass, waypoints.",
                 {}, false, false, nowMs()},
     };
 
@@ -151,6 +149,40 @@ void ProfileManager::createStarterProfiles() {
     }
 
     Log::info(kLog, "created the starter profiles ({})", starters.size());
+}
+
+// Earlier builds shipped two profiles named after servers and a set of matching rules
+// on a third. They go, once — but only while they still hold exactly what was shipped,
+// so a profile the player has since made their own is left alone.
+void ProfileManager::dropShippedServerProfiles() {
+    const std::pair<std::string, std::vector<std::string>> shipped[]{
+        {"Hive", {"hive", "hivebedrock"}},
+        {"CubeCraft", {"cubecraft", "cubecraft.net"}},
+    };
+
+    for (const auto& [name, rules] : shipped) {
+        const Profile* profile = findMutable(name);
+        if (!profile || profile->serverMatches != rules) continue;
+
+        std::error_code ec;
+        std::filesystem::remove_all(Paths::profile(name), ec);
+        std::erase_if(profiles_, [&](const Profile& p) { return p.name == name; });
+
+        Log::info(kLog, "dropped the '{}' starter profile", name);
+    }
+
+    // The third one is still a profile worth having; only the rules it was shipped
+    // with have to go.
+    Profile* pvp = findMutable("PvP");
+    if (!pvp || pvp->serverMatches != std::vector<std::string>{"zeqa", "pvp", "duels"}) return;
+
+    pvp->serverMatches.clear();
+
+    nlohmann::json document = readJson(fileFor(pvp->name));
+    document["profile"] = profileToJson(*pvp);
+    writeJson(fileFor(pvp->name), document);
+
+    Log::info(kLog, "cleared the server rules shipped with the 'PvP' profile");
 }
 
 void ProfileManager::load() {
@@ -177,6 +209,10 @@ void ProfileManager::load() {
 
     if (profiles_.empty()) createStarterProfiles();
 
+    dropShippedServerProfiles();
+
+    if (profiles_.empty()) createStarterProfiles();
+
     if (!std::ranges::any_of(profiles_, [](const Profile& p) { return p.isDefault; })) {
         profiles_.front().isDefault = true;
     }
@@ -194,6 +230,13 @@ nlohmann::json ProfileManager::serializeCurrent() const {
     return document;
 }
 
+// The interfaces travel with the client, not with the profile. They are written here
+// because this is what every path that saves state already calls.
+void ProfileManager::saveInterfaceState() {
+    config().interfaceState = modules().save(ModuleManager::Interfaces::Only);
+    config().save();
+}
+
 void ProfileManager::saveCurrent() {
     if (current_.name.empty()) return;
 
@@ -204,7 +247,6 @@ void ProfileManager::saveCurrent() {
     if (switching_) return;
 
     current_.modifiedAt = nowMs();
-    current_.theme = theme().name;
 
     if (Profile* stored = findMutable(current_.name)) *stored = current_;
 
@@ -223,16 +265,24 @@ bool ProfileManager::switchTo(const std::string& name, bool automatic) {
         if (profile.name == name) found = &profile;
     }
 
+    // The name saved in the configuration outlives the profile it names: it survives a
+    // folder deleted by hand and the server profiles earlier builds shipped. Landing on
+    // the default one beats starting with no profile at all.
     if (!found) {
-        Log::warn(kLog, "unknown profile: {}", name);
-        return false;
+        Log::warn(kLog, "unknown profile '{}', falling back to the default one", name);
+
+        for (const Profile& profile : profiles_) {
+            if (profile.isDefault) found = &profile;
+        }
+        if (!found && !profiles_.empty()) found = &profiles_.front();
+        if (!found) return false;
     }
-    if (current_.name == name) return true;
 
     // Taken by value: everything below reaches back into this manager through
     // onDisable and onEnable, and anything that touches profiles_ there would leave
     // a pointer into it dangling.
     const Profile target = *found;
+    if (current_.name == target.name) return true;
 
     if (!current_.name.empty()) saveCurrent();
 
@@ -243,29 +293,26 @@ bool ProfileManager::switchTo(const std::string& name, bool automatic) {
     modules().disableAll();
 
     current_ = target;
-    applyDocument(readJson(fileFor(name)));
-
-    ThemeManager::get().apply(current_.theme);
+    applyDocument(readJson(fileFor(target.name)));
 
     switching_ = false;
 
     ProfileChangeEvent event;
     event.previous = previous;
-    event.current = name;
+    event.current = target.name;
     event.automatic = automatic;
     events().emit(event);
 
-    Log::info(kLog, "profile -> {}{}", name, automatic ? " (automatique)" : "");
+    Log::info(kLog, "profile -> {}{}", target.name, automatic ? " (automatique)" : "");
     return true;
 }
 
 bool ProfileManager::create(const std::string& name, const std::string& copyFrom) {
-    const std::string finalName = uniqueName(name.empty() ? "Nouveau profil" : name);
+    const std::string finalName = uniqueName(name.empty() ? "New profile" : name);
 
     Profile profile;
     profile.name = finalName;
     profile.modifiedAt = nowMs();
-    profile.theme = theme().name;
 
     nlohmann::json document;
     document["formatVersion"] = kFormatVersion;
@@ -286,7 +333,7 @@ bool ProfileManager::create(const std::string& name, const std::string& copyFrom
 }
 
 bool ProfileManager::duplicate(const std::string& name, const std::string& newName) {
-    return create(newName.empty() ? name + " (copie)" : newName, name);
+    return create(newName.empty() ? name + " (copy)" : newName, name);
 }
 
 bool ProfileManager::remove(const std::string& name) {
@@ -367,9 +414,8 @@ std::optional<std::string> ProfileManager::profileForServer(std::string_view add
 
     if (best) return best->name;
 
-    for (const Profile& profile : profiles_) {
-        if (profile.isDefault) return profile.name;
-    }
+    // No rule matched. Falling back to the default profile here would undo the one the
+    // player picked by hand every time they joined a world.
     return std::nullopt;
 }
 
@@ -442,7 +488,7 @@ bool ProfileManager::restore(const std::string& profile, const std::string& vers
     std::error_code ec;
     if (!std::filesystem::exists(path, ec)) return false;
 
-    snapshot("avant restauration");
+    snapshot("before restore");
 
     const nlohmann::json document = readJson(path);
     if (document.is_null()) return false;
@@ -485,7 +531,7 @@ bool ProfileManager::importCode(std::string_view code, std::string* importedName
     }
 
     Profile profile = profileFromJson(document.value("profile", nlohmann::json::object()),
-                                      "Profil importé");
+                                      "Imported profile");
     profile.name = uniqueName(profile.name);
     profile.isDefault = false;
     profile.modifiedAt = nowMs();

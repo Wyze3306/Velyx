@@ -4,10 +4,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
+#include <filesystem>
 #include <format>
 
 #include <velyx/Version.hpp>
 
+#include "core/Lang.hpp"
 #include "core/Paths.hpp"
 #include "core/Strings.hpp"
 #include "dll/Velyx.hpp"
@@ -23,6 +26,7 @@
 #include "dll/feature/Services.hpp"
 #include "dll/memory/Signatures.hpp"
 #include "dll/module/ModuleManager.hpp"
+#include "dll/ui/Notifications.hpp"
 #include "dll/ui/Theme.hpp"
 #include "dll/ui/Ui.hpp"
 
@@ -45,8 +49,8 @@ struct FilterItem {
 };
 
 const FilterItem kFilters[] = {
-    {"Tous", 0}, {"Favoris", 1}, {"Déplacement", 2}, {"HUD", 3},
-    {"Rendu", 4}, {"Utilitaires", 5}, {"Divers", 6}, {"Scripts", 7}, {"Client", 8},
+    {"All", 0}, {"Favourites", 1}, {"Movement", 2}, {"HUD", 3},
+    {"Render", 4}, {"Utility", 5}, {"Misc", 6}, {"Scripts", 7}, {"Client", 8},
 };
 
 struct PageItem {
@@ -55,9 +59,45 @@ struct PageItem {
 };
 
 const PageItem kPages[] = {
-    {"Thèmes", 1}, {"Profils", 2}, {"Historique", 5},
-    {"Captures", 6}, {"Raccourcis", 3}, {"Diagnostic", 4},
+    {"Modules", 0}, {"Themes", 1}, {"Profiles", 2}, {"History", 5},
+    {"Screenshots", 6}, {"Keybinds", 3}, {"Diagnostics", 4},
 };
+
+// Used by the share code and by nothing else; it stays here rather than in core,
+// which knows nothing about windows beyond paths.
+bool copyToClipboard(const std::string& text) {
+    if (!OpenClipboard(nullptr)) return false;
+
+    bool copied = false;
+    EmptyClipboard();
+
+    if (const HGLOBAL handle = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1)) {
+        if (void* memory = GlobalLock(handle)) {
+            std::memcpy(memory, text.c_str(), text.size() + 1);
+            GlobalUnlock(handle);
+            copied = SetClipboardData(CF_TEXT, handle) != nullptr;
+        }
+        if (!copied) GlobalFree(handle);
+    }
+
+    CloseClipboard();
+    return copied;
+}
+
+std::string clipboardText() {
+    if (!OpenClipboard(nullptr)) return {};
+
+    std::string text;
+    if (const HANDLE handle = GetClipboardData(CF_TEXT)) {
+        if (const char* memory = static_cast<const char*>(GlobalLock(handle))) {
+            text.assign(memory, strnlen(memory, GlobalSize(handle)));
+            GlobalUnlock(handle);
+        }
+    }
+
+    CloseClipboard();
+    return text;
+}
 
 ModuleCategory categoryForFilter(int filter) {
     switch (filter) {
@@ -75,18 +115,22 @@ ModuleCategory categoryForFilter(int filter) {
 }
 
 ClickGui::ClickGui()
-    : Module("clickgui", "Menu Velyx", ModuleCategory::Client,
-             "Le menu principal du client.") {
-    markEssential();
+    : Module("clickgui", "Velyx menu", ModuleCategory::Client,
+             "The client's main menu.") {
+    markInterfaceModule();
 
     keybind() = config().guiKey;
 
-    settings.header("Fenêtre");
-    settings.toggle("rememberPosition", "Mémoriser la position", true);
+    settings.header("Interface");
+    settings.dropdown("language", "Language", config().language,
+                      lang::available(Velyx::get().asset("lang")));
+
+    settings.header("Window");
+    settings.toggle("rememberPosition", "Remember the position", true);
     settings.position("windowPosition", "Position", {0.5f, 0.5f});
-    settings.toggle("dimBackground", "Assombrir le jeu", true);
-    settings.slider("dimAmount", "Intensité", 0.45f, 0.f, 0.9f);
-    settings.toggle("blurBackground", "Flouter le fond", true);
+    settings.toggle("dimBackground", "Dim the game", true);
+    settings.slider("dimAmount", "Strength", 0.45f, 0.f, 0.9f);
+    settings.toggle("blurBackground", "Blur the background", true);
 
     settings.find("dimAmount")->visibleWhen = [this] {
         return settings.value<bool>("dimBackground", true);
@@ -97,7 +141,14 @@ ClickGui::ClickGui()
     on(&ClickGui::onKey, EventPriority::First);
     on(&ClickGui::onChar, EventPriority::First);
 
-    addKeywords({"menu", "gui", "clickgui", "interface"});
+    modules().addShortcut(&config().searchKey, [this] { openOnSearch(); });
+
+    addKeywords({"menu", "gui", "clickgui", "interface", "search"});
+}
+
+void ClickGui::openOnSearch() {
+    searchRequested_.store(true, std::memory_order_release);
+    if (!enabled()) modules().requestEnabled(this, true);
 }
 
 void ClickGui::onEnable() {
@@ -107,8 +158,12 @@ void ClickGui::onEnable() {
 }
 
 void ClickGui::onDisable() {
-    WindowHook::setCaptureInput(false);
+    // The HUD editor opens from here and the menu closes behind it, so the cursor is
+    // only given back once nothing is on screen any more.
+    if (!modules().anyInterfaceOpen()) WindowHook::setCaptureInput(false);
+
     profiles().saveCurrent();
+    ProfileManager::saveInterfaceState();
 }
 
 void ClickGui::onMouse(MouseEvent& event) {
@@ -119,6 +174,14 @@ void ClickGui::onMouse(MouseEvent& event) {
 void ClickGui::onKey(KeyEvent& event) {
 
     if (event.key == keybind().key) return;
+
+    const Keybind& search = config().searchKey;
+    if (event.down && !event.repeat && search.bound() && event.key == search.key &&
+        event.ctrl == search.ctrl && event.shift == search.shift && event.alt == search.alt) {
+        openOnSearch();
+        event.cancel();
+        return;
+    }
 
     if (event.down && event.key == VK_ESCAPE && !ui().capturingText()) {
         modules().requestEnabled(this, false);
@@ -166,6 +229,21 @@ std::vector<Module*> ClickGui::visibleModules() const {
 void ClickGui::onRender(RenderTopEvent& event) {
     Renderer& renderer = *event.renderer;
     const auto& active = theme();
+
+    if (searchRequested_.exchange(false, std::memory_order_acq_rel)) {
+        page_ = Page::Modules;
+        showSettings_ = false;
+        focusSearch_ = true;
+    }
+
+    // The language is picked from this module's own settings. Swapping the table here
+    // keeps it on the thread that reads every string it hands out.
+    if (const std::string wanted = settings.value<std::string>("language", config().language);
+        wanted != lang::code()) {
+        lang::load(wanted, Velyx::get().asset("lang"));
+        config().language = wanted;
+        config().save();
+    }
 
     open_.speed = active.motion(14.f);
     open_.update(event.deltaSeconds);
@@ -256,16 +334,26 @@ void ClickGui::drawHeader(const Rect& rect) {
     renderer.line({rect.left + 16.f, rect.bottom}, {rect.right - 16.f, rect.bottom},
                   active.border.fade(0.6f), 1.f);
 
-    const Vec2 mark{rect.left + 30.f, rect.center().y};
-    renderer.polyline({{mark.x - 8.f, mark.y - 8.f}, {mark.x, mark.y + 8.f},
-                       {mark.x + 8.f, mark.y - 8.f}},
-                      active.liveAccent(), 2.4f);
+    const Rect mark{rect.left + 18.f, rect.center().y - 13.f, rect.left + 44.f,
+                    rect.center().y + 13.f};
 
-    gui.text("VELYX", Rect{rect.left + 48.f, rect.top, rect.left + 160.f, rect.bottom}, active.text,
+    // Resolved once: the path never changes, and this runs every frame.
+    static const std::filesystem::path markFile = Velyx::get().asset("icon.png");
+
+    if (ID2D1Bitmap1* icon = renderer.image(markFile)) {
+        renderer.drawImageRounded(icon, mark, 7.f);
+    } else {
+        renderer.polyline({{mark.center().x - 8.f, mark.center().y - 8.f},
+                           {mark.center().x, mark.center().y + 8.f},
+                           {mark.center().x + 8.f, mark.center().y - 8.f}},
+                          active.liveAccent(), 2.4f);
+    }
+
+    gui.text("VELYX", Rect{rect.left + 52.f, rect.top, rect.left + 160.f, rect.bottom}, active.text,
              15.f, FontWeight::Bold);
 
     gui.text(version::kString,
-             Rect{rect.left + 116.f, rect.top, rect.left + 180.f, rect.bottom}, active.textDim,
+             Rect{rect.left + 120.f, rect.top, rect.left + 184.f, rect.bottom}, active.textDim,
              10.5f, FontWeight::Regular);
 
     const Rect close{rect.right - 46.f, rect.center().y - 14.f, rect.right - 18.f,
@@ -298,8 +386,15 @@ void ClickGui::drawSidebar(const Rect& rect) {
     renderer.fillRect(rect, active.backgroundDeep.fade(0.5f));
     renderer.line({rect.right, rect.top}, {rect.right, rect.bottom}, active.border.fade(0.6f), 1.f);
 
-    gui.text("PROFILS", Rect{rect.left + 20.f, rect.top + 10.f, rect.right, rect.top + 28.f},
-             active.textDim, 10.f, FontWeight::Bold);
+    gui.text("PROFILES", Rect{rect.left + 20.f, rect.top + 10.f, rect.right, rect.top + 28.f},
+             active.textDim, 10.5f, FontWeight::Bold);
+
+    // The two actions are pinned to the bottom; the page list follows the profiles from
+    // the top, so the sidebar reads as one column rather than two blocks with a hole
+    // between them.
+    const float navHeight = static_cast<float>(std::size(kPages)) * 30.f;
+    const float actionsTop = rect.bottom - 88.f;
+    const float navLimit = actionsTop - 20.f - navHeight;
 
     float y = rect.top + 32.f;
     const auto& all = profiles().all();
@@ -308,7 +403,7 @@ void ClickGui::drawSidebar(const Rect& rect) {
         const Profile& profile = all[i];
         const Rect row{rect.left + 10.f, y, rect.right - 10.f, y + 44.f};
         y += 46.f;
-        if (row.bottom > rect.bottom - 200.f) break;
+        if (row.bottom > navLimit - 24.f) break;
 
         const bool current = profile.name == profiles().current().name;
         const UiId id("profile_row", static_cast<int>(i));
@@ -327,15 +422,14 @@ void ClickGui::drawSidebar(const Rect& rect) {
 
         gui.text(profile.name, Rect{row.left + 26.f, row.top + 6.f, row.right - 10.f,
                                     row.top + 24.f},
-                 lerp(active.textMuted, active.text, std::max(hover, on)), 13.f,
+                 lerp(active.textMuted, active.text, std::max(hover, on)), 13.5f,
                  current ? FontWeight::SemiBold : FontWeight::Medium);
 
-        const std::string hint =
-            profile.serverMatches.empty()
-                ? (profile.isDefault ? "Par défaut" : "Manuel")
-                : "Auto · " + strings::join(profile.serverMatches, ", ");
+        const std::string hint = !profile.description.empty() ? profile.description
+                                 : profile.isDefault          ? "Default profile"
+                                                              : "Manual profile";
         gui.text(hint, Rect{row.left + 26.f, row.top + 22.f, row.right - 10.f, row.bottom - 4.f},
-                 active.textDim, 10.5f, FontWeight::Regular);
+                 active.textMuted, 11.5f, FontWeight::Regular);
 
         if (pressed && !current) {
             profiles().switchTo(profile.name);
@@ -344,7 +438,7 @@ void ClickGui::drawSidebar(const Rect& rect) {
         }
     }
 
-    float navY = rect.bottom - 56.f - static_cast<float>(std::size(kPages)) * 30.f;
+    float navY = std::min(y + 14.f, navLimit);
 
     renderer.line({rect.left + 20.f, navY - 12.f}, {rect.right - 20.f, navY - 12.f},
                   active.border.fade(0.5f), 1.f);
@@ -366,8 +460,8 @@ void ClickGui::drawSidebar(const Rect& rect) {
         }
 
         gui.text(item.label, Rect{row.left + 16.f, row.top, row.right - 10.f, row.bottom},
-                 lerp(lerp(active.textDim, active.textMuted, hover), active.liveAccent(), on),
-                 12.5f, current ? FontWeight::SemiBold : FontWeight::Medium);
+                 lerp(lerp(active.textMuted, active.text, hover), active.liveAccent(), on),
+                 13.f, current ? FontWeight::SemiBold : FontWeight::Medium);
 
         if (pressed) {
             page_ = static_cast<Page>(item.page);
@@ -376,10 +470,21 @@ void ClickGui::drawSidebar(const Rect& rect) {
         }
     }
 
+    // The HUD editor is a screen of its own rather than a page of this one, so it gets
+    // a button here instead of a row in the list above.
+    if (gui.button(UiId("open_hud_editor"),
+                   Rect{rect.left + 12.f, actionsTop, rect.right - 12.f, actionsTop + 32.f},
+                   "HUD editor", true)) {
+        if (Module* editor = modules().find("hud_editor")) {
+            modules().requestEnabled(editor, true);
+            modules().requestEnabled(this, false);
+        }
+    }
+
     if (gui.button(UiId("new_profile"),
-                   Rect{rect.left + 12.f, rect.bottom - 46.f, rect.right - 12.f, rect.bottom - 14.f},
-                   "Nouveau profil")) {
-        profiles().create("Nouveau profil");
+                   Rect{rect.left + 12.f, rect.bottom - 48.f, rect.right - 12.f, rect.bottom - 16.f},
+                   "New profile")) {
+        profiles().create("New profile");
     }
 }
 
@@ -409,7 +514,14 @@ void ClickGui::drawCategoryBar(const Rect& rect) {
 
     const Rect search{rect.right - 268.f, rect.center().y - 16.f, rect.right - 20.f,
                       rect.center().y + 16.f};
-    gui.textField(UiId("search"), search, search_, "Rechercher un module, un réglage", 48);
+
+    const UiId searchId("search");
+    if (focusSearch_) {
+        focusSearch_ = false;
+        gui.focusText(searchId);
+    }
+
+    gui.textField(searchId, search, search_, "Search a module or a setting", 48);
 }
 
 void ClickGui::drawModuleGrid(const Rect& rect) {
@@ -420,7 +532,7 @@ void ClickGui::drawModuleGrid(const Rect& rect) {
     const auto list = visibleModules();
 
     if (list.empty()) {
-        gui.text(search_.empty() ? "Rien dans cette catégorie." : "Aucun résultat.", rect,
+        gui.text(search_.empty() ? "Nothing in this category." : "No results.", rect,
                  active.textDim, 13.f, FontWeight::Regular, TextAlign::Center);
         return;
     }
@@ -462,11 +574,11 @@ void ClickGui::drawModuleGrid(const Rect& rect) {
 
         gui.text(module->name(), Rect{card.left + 16.f, card.top + 10.f, card.right - 74.f,
                                       card.top + 30.f},
-                 lerp(active.textMuted, active.text, on), 13.5f, FontWeight::SemiBold);
+                 lerp(active.textMuted, active.text, on), 14.f, FontWeight::SemiBold);
 
         gui.text(module->description(), Rect{card.left + 16.f, card.top + 28.f, card.right - 74.f,
                                              card.bottom - 8.f},
-                 active.textDim, 11.f, FontWeight::Regular);
+                 active.textMuted, 11.5f, FontWeight::Regular);
 
         const Rect gear{card.right - 70.f, card.center().y - 14.f, card.right - 42.f,
                         card.center().y + 14.f};
@@ -593,7 +705,7 @@ float ClickGui::drawSetting(const Rect& rect, Module& owner, Setting& setting, i
         case SettingType::Position: {
             gui.text(setting.label, Rect{row.left + 10.f, row.top, row.left + 200.f, row.bottom},
                      active.text, 14.f);
-            gui.text("Déplacez l'élément dans l'éditeur de HUD",
+            gui.text("Move the element in the HUD editor",
                      Rect{row.left + 200.f, row.top, row.right - 10.f, row.bottom},
                      active.textMuted, 11.5f, FontWeight::Regular, TextAlign::Right);
             break;
@@ -645,7 +757,7 @@ void ClickGui::drawSettings(const Rect& rect) {
 
     if (module.permissions().any()) {
         const auto labels = module.permissions().describe();
-        gui.text("Accès : " + strings::join(labels, " · "),
+        gui.text("Access: " + strings::join(labels, " · "),
                  Rect{back.right + 12.f, header.top + 44.f, header.right - 240.f, header.bottom},
                  active.warning.fade(0.85f), 10.5f, FontWeight::Medium);
     }
@@ -711,15 +823,15 @@ void ClickGui::drawSettings(const Rect& rect) {
     if (hasAdvanced) {
         if (gui.button(UiId("advanced"),
                        Rect{actions.left, actions.top, actions.left + 190.f, actions.bottom},
-                       showAdvanced_ ? "Masquer les options avancées"
-                                     : "Options avancées")) {
+                       showAdvanced_ ? "Hide the advanced options"
+                                     : "Advanced options")) {
             showAdvanced_ = !showAdvanced_;
         }
     }
 
     if (gui.button(UiId("reset"),
                    Rect{actions.right - 150.f, actions.top, actions.right, actions.bottom},
-                   "Réinitialiser")) {
+                   "Reset")) {
         module.settings.resetAll();
     }
 
@@ -732,8 +844,8 @@ void ClickGui::drawThemesPage(const Rect& rect) {
     const auto& active = theme();
 
     const Rect header{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 46.f};
-    gui.text("Thèmes", header, active.text, 17.f, FontWeight::Bold);
-    gui.text("Modifiez les couleurs, les arrondis, les polices et les animations.",
+    gui.text("Themes", header, active.text, 17.f, FontWeight::Bold);
+    gui.text("Change the colours, the corners, the fonts and the animation.",
              Rect{header.left, header.bottom - 10.f, header.right, header.bottom + 8.f},
              active.textMuted, 12.f, FontWeight::Regular);
 
@@ -776,7 +888,8 @@ void ClickGui::drawThemesPage(const Rect& rect) {
 
         if (pressed) {
             manager.apply(entry.name);
-            profiles().mutableCurrent().theme = entry.name;
+            config().theme = entry.name;
+            config().save();
         }
     }
 
@@ -794,38 +907,72 @@ void ClickGui::drawThemesPage(const Rect& rect) {
     };
 
     bool changed = false;
-    changed |= gui.colorRow(UiId("t_accent"), row(40.f), "Accent principal", draft.accent);
-    changed |= gui.colorRow(UiId("t_accent2"), row(40.f), "Accent secondaire", draft.accentDeep);
-    changed |= gui.colorRow(UiId("t_bg"), row(40.f), "Fond", draft.background);
+    changed |= gui.colorRow(UiId("t_accent"), row(40.f), "Primary accent", draft.accent);
+    changed |= gui.colorRow(UiId("t_accent2"), row(40.f), "Secondary accent", draft.accentDeep);
+    changed |= gui.colorRow(UiId("t_bg"), row(40.f), "Background", draft.background);
     changed |= gui.colorRow(UiId("t_surface"), row(40.f), "Surface", draft.surface);
-    changed |= gui.colorRow(UiId("t_text"), row(40.f), "Texte", draft.text);
-    changed |= gui.sliderRow(UiId("t_radius"), row(52.f), "Arrondi des panneaux", "", draft.panelRadius,
+    changed |= gui.colorRow(UiId("t_text"), row(40.f), "Text", draft.text);
+    changed |= gui.sliderRow(UiId("t_radius"), row(52.f), "Panel corner radius", "", draft.panelRadius,
                              0.f, 32.f, " px");
-    changed |= gui.sliderRow(UiId("t_scale"), row(52.f), "Échelle du texte", "", draft.fontScale,
+    changed |= gui.sliderRow(UiId("t_scale"), row(52.f), "Text scale", "", draft.fontScale,
                              0.7f, 1.6f, "x");
-    changed |= gui.sliderRow(UiId("t_motion"), row(52.f), "Vitesse des animations",
-                             "0 désactive complètement les animations.", draft.animationSpeed, 0.f,
+    changed |= gui.sliderRow(UiId("t_motion"), row(52.f), "Animation speed",
+                             "0 turns animation off entirely.", draft.animationSpeed, 0.f,
                              2.f, "x");
-    changed |= gui.toggleRow(UiId("t_blur"), row(44.f), "Flou d'arrière-plan", "", draft.blur);
-    changed |= gui.toggleRow(UiId("t_rgb"), row(44.f), "Accent RGB",
-                             "Fait défiler la teinte de l'accent.", draft.rgbAccent);
+    changed |= gui.toggleRow(UiId("t_blur"), row(44.f), "Background blur", "", draft.blur);
+    changed |= gui.toggleRow(UiId("t_rgb"), row(44.f), "RGB accent",
+                             "Cycles the accent hue.", draft.rgbAccent);
 
     gui.endScroll();
 
     if (changed) manager.mutableCurrent() = draft;
 
     const Rect actions{rect.left + 20.f, rect.bottom - 48.f, rect.right - 20.f, rect.bottom - 14.f};
+
     if (gui.button(UiId("theme_save"),
                    Rect{actions.left, actions.top, actions.left + 190.f, actions.bottom},
-                   "Enregistrer comme nouveau thème", true)) {
+                   "Save as a new theme", true)) {
         Theme copy = manager.current();
-        copy.name += " personnalisé";
-        manager.save(copy);
+        copy.name += " custom";
+
+        if (manager.save(copy)) {
+            config().theme = copy.name;
+            config().save();
+            Notifications::success("Theme saved", copy.name);
+        }
     }
-    if (gui.button(UiId("theme_reload"),
+
+    // The look of the interface travels on its own, without a profile: it is the same
+    // whichever one is active.
+    if (gui.button(UiId("theme_copy"),
                    Rect{actions.left + 200.f, actions.top, actions.left + 340.f, actions.bottom},
-                   "Recharger")) {
+                   "Copy the theme")) {
+        if (copyToClipboard(manager.exportCode())) {
+            Notifications::success("Theme copied",
+                                   "Paste the code to share how the interface looks.");
+        } else {
+            Notifications::warning("Clipboard unavailable");
+        }
+    }
+
+    if (gui.button(UiId("theme_paste"),
+                   Rect{actions.left + 350.f, actions.top, actions.left + 490.f, actions.bottom},
+                   "Paste a theme")) {
+        std::string imported;
+        if (manager.importCode(clipboardText(), &imported)) {
+            config().theme = imported;
+            config().save();
+            Notifications::success("Theme imported", imported);
+        } else {
+            Notifications::warning("No valid theme code on the clipboard");
+        }
+    }
+
+    if (gui.button(UiId("theme_reload"),
+                   Rect{actions.right - 120.f, actions.top, actions.right, actions.bottom},
+                   "Reload")) {
         manager.load();
+        manager.apply(config().theme);
     }
 }
 
@@ -834,11 +981,12 @@ void ClickGui::drawProfilesPage(const Rect& rect) {
     ProfileManager& manager = profiles();
     const auto& active = theme();
 
-    gui.text("Profils", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
+    gui.text("Profiles", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
              active.text, 17.f, FontWeight::Bold);
-    gui.text("Un jeu de réglages par contexte, avec bascule automatique selon le serveur.",
+    gui.text("A set of modules per context. The active profile follows what "
+             "you change; save it to freeze it.",
              Rect{rect.left + 20.f, rect.top + 38.f, rect.right - 20.f, rect.top + 58.f},
-             active.textMuted, 12.f, FontWeight::Regular);
+             active.textMuted, 12.5f, FontWeight::Regular);
 
     const Rect list{rect.left + 20.f, rect.top + 70.f, rect.left + 380.f, rect.bottom - 120.f};
     const auto& all = manager.all();
@@ -868,12 +1016,11 @@ void ClickGui::drawProfilesPage(const Rect& rect) {
         gui.text(profile.name, Rect{row.left + 14.f, row.top + 6.f, row.right - 20.f, row.top + 28.f},
                  active.text, 13.5f, FontWeight::SemiBold);
 
-        const std::string subtitle =
-            profile.serverMatches.empty()
-                ? (profile.isDefault ? "Profil par défaut" : "Aucune règle automatique")
-                : "Auto : " + strings::join(profile.serverMatches, ", ");
+        const std::string subtitle = !profile.description.empty() ? profile.description
+                                     : profile.isDefault ? "Default profile"
+                                                         : "Manual profile";
         gui.text(subtitle, Rect{row.left + 14.f, row.top + 26.f, row.right - 20.f, row.bottom - 4.f},
-                 active.textMuted, 11.f, FontWeight::Regular);
+                 active.textMuted, 11.5f, FontWeight::Regular);
 
         if (pressed && !isCurrent) {
             manager.switchTo(profile.name);
@@ -885,12 +1032,12 @@ void ClickGui::drawProfilesPage(const Rect& rect) {
 
     const Rect side{rect.left + 400.f, rect.top + 70.f, rect.right - 20.f, rect.bottom - 20.f};
 
-    gui.sectionHeader("Nouveau profil", Rect{side.left, side.top, side.right, side.top + 20.f});
+    gui.sectionHeader("New profile", Rect{side.left, side.top, side.right, side.top + 20.f});
     gui.textField(UiId("new_profile"),
                   Rect{side.left, side.top + 28.f, side.right - 110.f, side.top + 58.f},
-                  newProfileName_, "Nom du profil", 32);
+                  newProfileName_, "Profile name", 32);
     if (gui.button(UiId("create_profile"),
-                   Rect{side.right - 100.f, side.top + 28.f, side.right, side.top + 58.f}, "Créer",
+                   Rect{side.right - 100.f, side.top + 28.f, side.right, side.top + 58.f}, "Create",
                    true)) {
         if (!newProfileName_.empty()) {
             manager.create(newProfileName_);
@@ -898,24 +1045,36 @@ void ClickGui::drawProfilesPage(const Rect& rect) {
         }
     }
 
-    gui.sectionHeader("Partage", Rect{side.left, side.top + 78.f, side.right, side.top + 98.f});
+    gui.sectionHeader("Sharing", Rect{side.left, side.top + 78.f, side.right, side.top + 98.f});
     gui.textField(UiId("share_code"),
                   Rect{side.left, side.top + 106.f, side.right, side.top + 136.f}, profileCode_,
-                  "Collez un code VELYX1:… ou exportez le profil actuel", 4096);
+                  "Paste a VELYX1:… code, or export the current profile", 4096);
 
     if (gui.button(UiId("export_code"),
                    Rect{side.left, side.top + 146.f, side.left + 150.f, side.top + 176.f},
-                   "Exporter")) {
+                   "Export")) {
         profileCode_ = manager.exportCode();
     }
-    if (gui.button(UiId("import_code"),
+    if (gui.button(UiId("copy_code"),
                    Rect{side.left + 160.f, side.top + 146.f, side.left + 310.f, side.top + 176.f},
-                   "Importer")) {
+                   "Copy the code")) {
+        const std::string code = manager.exportCode();
+        profileCode_ = code;
+
+        if (copyToClipboard(code)) {
+            Notifications::success("Code copied", "Paste it to share your set-up.");
+        } else {
+            Notifications::warning("Clipboard unavailable", "The code stays in the field.");
+        }
+    }
+    if (gui.button(UiId("import_code"),
+                   Rect{side.left + 320.f, side.top + 146.f, side.left + 470.f, side.top + 176.f},
+                   "Import")) {
         std::string imported;
-        if (manager.importCode(profileCode_, &imported)) profileCode_ = "Importé : " + imported;
+        if (manager.importCode(profileCode_, &imported)) profileCode_ = "Imported: " + imported;
     }
 
-    gui.sectionHeader("Historique", Rect{side.left, side.top + 196.f, side.right, side.top + 216.f});
+    gui.sectionHeader("History", Rect{side.left, side.top + 196.f, side.right, side.top + 216.f});
 
     const auto versions = manager.versions(manager.current().name);
     float versionY = side.top + 224.f;
@@ -929,15 +1088,23 @@ void ClickGui::drawProfilesPage(const Rect& rect) {
                  FontWeight::Regular);
 
         if (gui.button(UiId("restore", static_cast<int>(i)),
-                       Rect{row.right - 100.f, row.top, row.right, row.bottom}, "Restaurer")) {
+                       Rect{row.right - 100.f, row.top, row.right, row.bottom}, "Restore")) {
             manager.restore(manager.current().name, versions[i].id);
         }
     }
 
     if (gui.button(UiId("snapshot"),
                    Rect{side.left, versionY + 6.f, side.left + 190.f, versionY + 36.f},
-                   "Créer un point de restauration")) {
+                   "Create a restore point")) {
         manager.snapshot("manuel");
+        Notifications::success("Restore point created", manager.current().name);
+    }
+
+    if (gui.button(UiId("save_profile"),
+                   Rect{side.left + 200.f, versionY + 6.f, side.left + 350.f, versionY + 36.f},
+                   "Save the profile", true)) {
+        manager.saveCurrent();
+        Notifications::success("Profile saved", manager.current().name);
     }
 }
 
@@ -945,9 +1112,9 @@ void ClickGui::drawKeybindsPage(const Rect& rect) {
     Ui& gui = ui();
     const auto& active = theme();
 
-    gui.text("Raccourcis", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
+    gui.text("Keybinds", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
              active.text, 17.f, FontWeight::Bold);
-    gui.text("Tous les raccourcis du client, au même endroit.",
+    gui.text("Every keybind in the client, in one place.",
              Rect{rect.left + 20.f, rect.top + 38.f, rect.right - 20.f, rect.top + 58.f},
              active.textMuted, 12.f, FontWeight::Regular);
 
@@ -973,10 +1140,10 @@ void ClickGui::drawKeybindsPage(const Rect& rect) {
         if (row.bottom < view.top - 20.f || row.top > view.bottom + 20.f) continue;
 
         gui.text(module->name(), Rect{row.left + 6.f, row.top, row.left + 240.f, row.bottom},
-                 module->keybind().bound() ? active.text : active.textMuted, 13.f);
+                 module->keybind().bound() ? active.text : active.textMuted, 13.5f);
         gui.text(categoryLabel(module->category()),
                  Rect{row.left + 250.f, row.top, row.left + 380.f, row.bottom}, active.textMuted,
-                 11.5f, FontWeight::Regular);
+                 12.f, FontWeight::Regular);
 
         Keybind bind = module->keybind();
         if (gui.keybindField(UiId("kb", static_cast<int>(i)),
@@ -985,14 +1152,14 @@ void ClickGui::drawKeybindsPage(const Rect& rect) {
             module->keybind() = bind;
         }
 
-        std::string mode = bind.mode == Keybind::Mode::Hold     ? "Maintien"
-                           : bind.mode == Keybind::Mode::Once   ? "Impulsion"
-                                                                : "Bascule";
+        std::string mode = bind.mode == Keybind::Mode::Hold     ? "Hold"
+                           : bind.mode == Keybind::Mode::Once   ? "Press"
+                                                                : "Toggle";
         if (gui.dropdown(UiId("kbmode", static_cast<int>(i)),
                          Rect{row.right - 130.f, row.top, row.right, row.bottom}, mode,
-                         {"Bascule", "Maintien", "Impulsion"})) {
-            module->keybind().mode = mode == "Maintien"    ? Keybind::Mode::Hold
-                                     : mode == "Impulsion" ? Keybind::Mode::Once
+                         {"Toggle", "Hold", "Press"})) {
+            module->keybind().mode = mode == "Hold"    ? Keybind::Mode::Hold
+                                     : mode == "Press" ? Keybind::Mode::Once
                                                            : Keybind::Mode::Toggle;
         }
     }
@@ -1005,7 +1172,7 @@ void ClickGui::drawDiagnosticsPage(const Rect& rect) {
     const auto& active = theme();
     const Signatures& signatures = Signatures::get();
 
-    gui.text("Diagnostic", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
+    gui.text("Diagnostics", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
              active.text, 17.f, FontWeight::Bold);
 
     const auto missing = signatures.missing();
@@ -1018,8 +1185,8 @@ void ClickGui::drawDiagnosticsPage(const Rect& rect) {
     gui.renderer().strokeRounded(banner, (healthy ? active.success : active.warning).fade(0.5f),
                                  active.radius, 1.f);
 
-    gui.text(healthy ? "Toutes les signatures requises sont résolues."
-                     : std::format("{} signature(s) requises manquent pour cette version du jeu.",
+    gui.text(healthy ? "Every required signature resolved."
+                     : std::format("{} required signature(s) missing for this build of the game.",
                                    missing.size()),
              Rect{banner.left + 14.f, banner.top, banner.right - 14.f, banner.center().y + 2.f},
              healthy ? active.success : active.warning, 13.f, FontWeight::SemiBold);
@@ -1042,12 +1209,12 @@ void ClickGui::drawDiagnosticsPage(const Rect& rect) {
     gui.renderer().strokeRounded(updateBanner, updateColour.fade(0.5f), active.radius, 1.f);
 
     const std::string headline =
-        update.checking      ? "Recherche de mises à jour…"
-        : !update.checked    ? "Mises à jour non vérifiées"
-        : !update.error.empty() ? "Vérification impossible"
+        update.checking      ? "Checking for updates…"
+        : !update.checked    ? "Updates not checked"
+        : !update.error.empty() ? "Check failed"
         : update.updateAvailable
-            ? std::format("Version {} disponible", update.latest.tag)
-            : "Velyx est à jour";
+            ? std::format("Version {} available", update.latest.tag)
+            : "Velyx is up to date";
 
     gui.text(headline,
              Rect{updateBanner.left + 14.f, updateBanner.top + 8.f, updateBanner.right - 250.f,
@@ -1058,7 +1225,7 @@ void ClickGui::drawDiagnosticsPage(const Rect& rect) {
     const std::string detail =
         !update.error.empty()
             ? update.error
-            : std::format("Version installée {} · canal {}", version::kFull,
+            : std::format("Installed version {} · channel {}", version::kFull,
                           config().updateChannel);
 
     gui.text(detail,
@@ -1079,7 +1246,7 @@ void ClickGui::drawDiagnosticsPage(const Rect& rect) {
     if (gui.button(UiId("update_check"),
                    Rect{updateBanner.right - 120.f, updateBanner.top + 10.f,
                         updateBanner.right - 14.f, updateBanner.top + 40.f},
-                   "Vérifier", false, !update.checking)) {
+                   "Check", false, !update.checking)) {
         updates::check(config().updateChannel);
     }
 
@@ -1087,7 +1254,7 @@ void ClickGui::drawDiagnosticsPage(const Rect& rect) {
         gui.button(UiId("update_open"),
                    Rect{updateBanner.right - 240.f, updateBanner.top + 44.f,
                         updateBanner.right - 14.f, updateBanner.bottom - 8.f},
-                   "Voir les nouveautés", true)) {
+                   "See what changed", true)) {
         updates::openReleasePage();
     }
 
@@ -1098,15 +1265,15 @@ void ClickGui::drawDiagnosticsPage(const Rect& rect) {
         gui.renderer().fillRounded(crashBanner, active.danger.fade(0.12f), active.radius);
         gui.renderer().strokeRounded(crashBanner, active.danger.fade(0.5f), active.radius, 1.f);
 
-        gui.text(std::format("Dernier plantage : {} ({})", report->exception, report->when),
+        gui.text(std::format("Last crash: {} ({})", report->exception, report->when),
                  Rect{crashBanner.left + 14.f, crashBanner.top + 8.f, crashBanner.right - 130.f,
                       crashBanner.top + 30.f},
                  active.danger, 13.f, FontWeight::SemiBold);
 
         gui.text(report->insideVelyx
-                     ? std::format("Origine probable : module « {} ». Le mode sans échec le "
-                                   "désactivera au prochain plantage.", report->suspect)
-                     : "Origine hors de Velyx : jeu, pilote graphique ou autre logiciel injecté.",
+                     ? std::format("Likely origin: the « {} » module. Safe mode will switch it "
+                                   "will switch it off after the next crash.", report->suspect)
+                     : "Origin outside Velyx: the game, the graphics driver or other injected software.",
                  Rect{crashBanner.left + 14.f, crashBanner.top + 30.f, crashBanner.right - 130.f,
                       crashBanner.bottom - 8.f},
                  active.textMuted, 11.5f, FontWeight::Regular);
@@ -1114,13 +1281,13 @@ void ClickGui::drawDiagnosticsPage(const Rect& rect) {
         if (gui.button(UiId("crash_open"),
                        Rect{crashBanner.right - 118.f, crashBanner.top + 10.f,
                             crashBanner.right - 14.f, crashBanner.top + 40.f},
-                       "Ouvrir")) {
+                       "Open")) {
             screenshot::revealInExplorer(report->file);
         }
         if (gui.button(UiId("crash_clear"),
                        Rect{crashBanner.right - 118.f, crashBanner.top + 44.f,
                             crashBanner.right - 14.f, crashBanner.bottom - 8.f},
-                       "Effacer")) {
+                       "Clear")) {
             crash::clearReports();
         }
     }
@@ -1144,11 +1311,11 @@ void ClickGui::drawDiagnosticsPage(const Rect& rect) {
 
         gui.renderer().fillCircle({row.left + 6.f, row.center().y}, 3.f, colour);
         gui.text(result.spec.name, Rect{row.left + 18.f, row.top, row.right - 220.f, row.bottom},
-                 active.text, 12.f, FontWeight::Regular);
+                 active.text, 12.5f, FontWeight::Regular);
         gui.text(result.spec.owner.empty() ? "—" : result.spec.owner,
                  Rect{row.right - 210.f, row.top, row.right - 90.f, row.bottom}, active.textMuted,
-                 11.f, FontWeight::Regular);
-        gui.text(result.resolved ? std::format("{:#x}", result.address) : "non résolue",
+                 11.5f, FontWeight::Regular);
+        gui.text(result.resolved ? std::format("{:#x}", result.address) : "unresolved",
                  Rect{row.right - 80.f, row.top, row.right, row.bottom}, colour, 11.f,
                  FontWeight::Medium, TextAlign::Right);
     }
@@ -1162,14 +1329,14 @@ void ClickGui::drawHistoryPage(const Rect& rect) {
     const auto& active = theme();
     const Playtime& tracker = Playtime::get();
 
-    gui.text("Historique", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
+    gui.text("History", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
              active.text, 17.f, FontWeight::Bold);
 
     const long long live = SessionStats::get().secondsPlayed();
 
     const std::array<std::pair<const char*, long long>, 3> totals{{
-        {"Aujourd'hui", tracker.today() + live},
-        {"7 derniers jours", tracker.thisWeek() + live},
+        {"Today", tracker.today() + live},
+        {"Last 7 days", tracker.thisWeek() + live},
         {"Total", tracker.total() + live},
     }};
 
@@ -1211,14 +1378,14 @@ void ClickGui::drawHistoryPage(const Rect& rect) {
         }
     }
 
-    gui.sectionHeader("Parties", Rect{rect.left + 20.f, rect.top + 228.f, rect.right - 20.f,
+    gui.sectionHeader("Matches", Rect{rect.left + 20.f, rect.top + 228.f, rect.right - 20.f,
                                       rect.top + 248.f});
 
     const auto matches = Playtime::matches(120);
     const Rect view{rect.left + 20.f, rect.top + 254.f, rect.right - 20.f, rect.bottom - 16.f};
 
     if (matches.empty()) {
-        gui.text("Aucune partie enregistrée pour l'instant.", view, active.textMuted, 12.5f,
+        gui.text("No matches recorded yet.", view, active.textMuted, 12.5f,
                  FontWeight::Regular, TextAlign::Center);
         return;
     }
@@ -1254,7 +1421,7 @@ void ClickGui::drawHistoryPage(const Rect& rect) {
         gui.text(std::format("{} FPS", static_cast<int>(match.averageFps)),
                  Rect{row.right - 160.f, row.top, row.right - 80.f, row.bottom},
                  active.liveAccent().fade(0.85f), 12.f, FontWeight::Medium, TextAlign::Right);
-        gui.text(std::format("{} blocs", strings::formatThousands(
+        gui.text(std::format("{} blocks", strings::formatThousands(
                                              static_cast<long long>(match.blocks))),
                  Rect{row.right - 70.f, row.top, row.right, row.bottom}, active.textMuted, 11.f,
                  FontWeight::Regular, TextAlign::Right);
@@ -1269,27 +1436,27 @@ void ClickGui::drawCapturesPage(const Rect& rect) {
     Renderer& renderer = gui.renderer();
     const auto& active = theme();
 
-    gui.text("Captures", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
+    gui.text("Screenshots", Rect{rect.left + 20.f, rect.top + 14.f, rect.right - 20.f, rect.top + 42.f},
              active.text, 17.f, FontWeight::Bold);
 
     const auto shots = screenshot::gallery(60);
     const auto markers = Clips::get().recent(12);
 
-    gui.text(std::format("{} capture(s) · {} marqueur(s)", shots.size(), markers.size()),
+    gui.text(std::format("{} screenshot(s) · {} marker(s)", shots.size(), markers.size()),
              Rect{rect.left + 20.f, rect.top + 38.f, rect.right - 20.f, rect.top + 58.f},
              active.textMuted, 12.f);
 
     if (gui.button(UiId("open_shots_folder"),
                    Rect{rect.right - 190.f, rect.top + 16.f, rect.right - 20.f, rect.top + 46.f},
-                   "Ouvrir le dossier")) {
+                   "Open the folder")) {
         screenshot::revealInExplorer(Paths::screenshots());
     }
 
     const Rect gallery{rect.left + 20.f, rect.top + 70.f, rect.right - 250.f, rect.bottom - 16.f};
 
     if (shots.empty()) {
-        gui.text("Aucune capture pour l'instant. Le mode capture range les images par serveur "
-                 "et par date.",
+        gui.text("No screenshots yet. Capture mode files them by server "
+                 "and by date.",
                  gallery, active.textMuted, 12.5f, FontWeight::Regular, TextAlign::Center);
     } else {
         constexpr int kColumns = 3;
@@ -1319,7 +1486,7 @@ void ClickGui::drawCapturesPage(const Rect& rect) {
                 renderer.drawImageRounded(bitmap, cell.inflated(-2.f), active.radius,
                                           0.85f + hover * 0.15f);
             } else {
-                gui.text("aperçu indisponible", cell, active.textMuted, 11.f, FontWeight::Regular,
+                gui.text("no preview", cell, active.textMuted, 11.f, FontWeight::Regular,
                          TextAlign::Center);
             }
 
@@ -1339,10 +1506,10 @@ void ClickGui::drawCapturesPage(const Rect& rect) {
     }
 
     const Rect side{rect.right - 230.f, rect.top + 70.f, rect.right - 20.f, rect.bottom - 16.f};
-    gui.sectionHeader("Marqueurs", Rect{side.left, side.top, side.right, side.top + 20.f});
+    gui.sectionHeader("Markers", Rect{side.left, side.top, side.right, side.top + 20.f});
 
     if (markers.empty()) {
-        gui.text("Posez un marqueur en jeu pour retrouver un moment dans un enregistrement.",
+        gui.text("Drop a marker in game to find a moment in a recording.",
                  Rect{side.left, side.top + 28.f, side.right, side.top + 90.f}, active.textMuted,
                  11.5f, FontWeight::Regular);
         return;
@@ -1366,7 +1533,7 @@ void ClickGui::drawCapturesPage(const Rect& rect) {
 
     if (gui.button(UiId("clear_markers"),
                    Rect{side.left, side.bottom - 38.f, side.right, side.bottom - 8.f},
-                   "Effacer les marqueurs")) {
+                   "Clear the markers")) {
         Clips::get().clear();
     }
 }
@@ -1382,10 +1549,10 @@ void ClickGui::drawFooter(const Rect& rect) {
 
     const int activeCount = static_cast<int>(modules().enabled().size());
 
-    gui.text(std::format("Velyx {}  ·  {} module(s) actif(s)  ·  profil « {} »", version::kString,
+    gui.text(std::format("Velyx {}  ·  {} module(s) on  ·  profile « {} »", version::kString,
                          activeCount, profiles().current().name),
              Rect{rect.left + 20.f, rect.top, rect.right - 200.f, rect.bottom}, active.textMuted,
-             11.5f, FontWeight::Regular);
+             12.f, FontWeight::Regular);
 
     gui.text(std::format("{} FPS", static_cast<int>(Velyx::get().fps())),
              Rect{rect.right - 180.f, rect.top, rect.right - 20.f, rect.bottom},

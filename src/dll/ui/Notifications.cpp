@@ -2,6 +2,7 @@
 
 #include <chrono>
 
+#include "core/Lang.hpp"
 #include "core/Log.hpp"
 #include "dll/render/Renderer.hpp"
 #include "dll/ui/Theme.hpp"
@@ -47,21 +48,21 @@ Notifications*& Notifications::instance() {
 }
 
 Notifications::Notifications()
-    : Module("notifications", "Centre de notifications", ModuleCategory::Client,
-             "Messages du client, avec historique.") {
+    : Module("notifications", "Notification centre", ModuleCategory::Client,
+             "The client's own messages, with a history.") {
     markEssential();
     instance() = this;
 
-    settings.header("Affichage");
-    settings.dropdown("corner", "Coin", "Haut droite",
-                      {"Haut droite", "Haut gauche", "Bas droite", "Bas gauche"});
-    settings.slider("duration", "Durée d'affichage", 4.f, 1.f, 15.f, "", " s");
-    settings.slider("scale", "Taille", 1.f, 0.7f, 1.6f, "", "x");
+    settings.header("Display");
+    settings.dropdown("corner", "Coin", "Top right",
+                      {"Top right", "Top left", "Bottom right", "Bottom left"});
+    settings.slider("duration", "Time on screen", 4.f, 1.f, 15.f, "", " s");
+    settings.slider("scale", "Size", 1.f, 0.7f, 1.6f, "", "x");
 
-    settings.header("Événements notifiés");
-    settings.toggle("onProfile", "Changement de profil", true);
-    settings.toggle("onModule", "Activation d'un module", false);
-    settings.toggle("onTheme", "Changement de thème", false);
+    settings.header("Events to notify");
+    settings.toggle("onProfile", "Profile changed", true);
+    settings.toggle("onModule", "Module toggled", false);
+    settings.toggle("onTheme", "Theme changed", false);
 
     always(&Notifications::onRender);
     always(&Notifications::onProfileChange);
@@ -69,7 +70,7 @@ Notifications::Notifications()
     always(&Notifications::onThemeChange);
 
     setEnabled(true, false);
-    addKeywords({"notifications", "alertes", "messages"});
+    addKeywords({"notifications", "alerts", "messages"});
 }
 
 void Notifications::push(NotificationKind kind, std::string title, std::string body,
@@ -110,20 +111,20 @@ void Notifications::error(std::string title, std::string body) {
 void Notifications::onProfileChange(ProfileChangeEvent& event) {
     if (!settings.value<bool>("onProfile", true)) return;
 
-    push(NotificationKind::Info, "Profil « " + event.current + " »",
-         event.automatic ? "Sélectionné automatiquement pour ce serveur." : "");
+    push(NotificationKind::Info, "Profile « " + event.current + " »",
+         event.automatic ? "Picked automatically for this server." : "");
 }
 
 void Notifications::onModuleToggle(ModuleToggleEvent& event) {
     if (!settings.value<bool>("onModule", false) || !event.byUser || !event.module) return;
 
     push(event.enabled ? NotificationKind::Success : NotificationKind::Info, event.module->name(),
-         event.enabled ? "Activé" : "Désactivé", 2.f);
+         event.enabled ? "On" : "Off", 2.f);
 }
 
 void Notifications::onThemeChange(ThemeChangeEvent& event) {
     if (!settings.value<bool>("onTheme", false)) return;
-    push(NotificationKind::Info, "Thème « " + event.name + " »", "", 2.5f);
+    push(NotificationKind::Info, "Theme « " + event.name + " »", "", 2.5f);
 }
 
 void Notifications::onRender(RenderTopEvent& event) {
@@ -132,10 +133,10 @@ void Notifications::onRender(RenderTopEvent& event) {
     Renderer& renderer = *event.renderer;
     const auto& active = theme();
     const float scale = settings.value<float>("scale", 1.f);
-    const std::string corner = settings.value<std::string>("corner", "Haut droite");
+    const std::string corner = settings.value<std::string>("corner", "Top right");
 
-    const bool right = corner.find("droite") != std::string::npos;
-    const bool bottom = corner.find("Bas") != std::string::npos;
+    const bool right = corner.find("right") != std::string::npos;
+    const bool bottom = corner.find("Bottom") != std::string::npos;
 
     const float width = kWidth * scale;
     const float margin = 16.f;
@@ -215,16 +216,16 @@ void Notifications::onRender(RenderTopEvent& event) {
         const Rect textArea{card.left + 46.f, card.top + 8.f, card.right - 12.f, card.bottom - 8.f};
 
         if (hasBody) {
-            renderer.text(notification.title,
+            renderer.text(tr(notification.title),
                           Rect{textArea.left, textArea.top, textArea.right,
                                textArea.top + 20.f * scale},
                           active.text, titleSpec);
-            renderer.text(notification.body,
+            renderer.text(tr(notification.body),
                           Rect{textArea.left, textArea.top + 20.f * scale, textArea.right,
                                textArea.bottom},
                           active.textMuted, bodySpec);
         } else {
-            renderer.text(notification.title, textArea, active.text, titleSpec);
+            renderer.text(tr(notification.title), textArea, active.text, titleSpec);
         }
 
         renderer.popOpacity();

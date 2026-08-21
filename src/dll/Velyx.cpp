@@ -5,6 +5,7 @@
 
 #include <velyx/Version.hpp>
 
+#include "core/Lang.hpp"
 #include "core/Log.hpp"
 #include "core/Paths.hpp"
 #include "core/Strings.hpp"
@@ -64,12 +65,23 @@ double Velyx::uptime() const {
 
 void Velyx::start(HMODULE self) {
     self_ = self;
+
+    // A build injected straight from the build tree carries its assets beside it; an
+    // install has them where the launcher unpacked them.
+    std::error_code ec;
+    const auto beside = selfDirectory(self) / "assets";
+    assets_ = std::filesystem::exists(beside, ec) ? beside : Paths::assets();
+
     ticksPerSecond_ = queryFrequency();
     startTicks_ = queryTicks();
     lastFrameTicks_ = startTicks_;
 
     running_.store(true, std::memory_order_release);
     bootstrap();
+}
+
+std::filesystem::path Velyx::asset(std::string_view relative) const {
+    return assets_ / std::filesystem::path(relative);
 }
 
 void Velyx::bootstrap() {
@@ -95,6 +107,8 @@ void Velyx::bootstrap() {
     settings.load();
     settings.markSessionStarted();
 
+    lang::load(settings.language, asset("lang"));
+
     crash::install();
 
     const bool safeMode = settings.shouldStartInSafeMode();
@@ -115,6 +129,7 @@ void Velyx::bootstrap() {
     }
 
     ThemeManager::get().load();
+    ThemeManager::get().apply(settings.theme);
 
     bindServices();
     Playtime::get().load();
@@ -123,6 +138,10 @@ void Velyx::bootstrap() {
     ModuleManager& manager = modules();
     manager.setSafeMode(safeMode);
     manager.initialize();
+
+    // Before the profile: the interfaces read their own settings from the
+    // configuration, and a profile has no say in them.
+    manager.load(settings.interfaceState, ModuleManager::Interfaces::Only);
 
     ProfileManager& profileManager = profiles();
     profileManager.load();
@@ -168,8 +187,7 @@ void Velyx::initialiseGraphicsOnce() {
     FontManager& fonts = FontManager::get();
     fonts.initialize(graphics.dwrite());
 
-    fonts.loadDirectory(selfDirectory(self_) / "assets" / "fonts");
-    fonts.loadDirectory(Paths::assets() / "fonts");
+    fonts.loadDirectory(asset("fonts"));
 
     // The title bar is the one place an injected client can say it is there without
     // drawing a pixel, and it survives into screenshots and screen shares.
@@ -335,6 +353,7 @@ void Velyx::shutdown() {
     ready_.store(false, std::memory_order_release);
 
     profiles().saveCurrent();
+    ProfileManager::saveInterfaceState();
     config().markSessionEnded();
 
     HookManager::get().uninstallAll();

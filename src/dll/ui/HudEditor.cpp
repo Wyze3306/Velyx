@@ -6,6 +6,7 @@
 #include <cmath>
 #include <format>
 
+#include "core/Lang.hpp"
 #include "dll/Velyx.hpp"
 #include "dll/config/ClientConfig.hpp"
 #include "dll/config/ProfileManager.hpp"
@@ -23,28 +24,28 @@ constexpr float kToolbarHeight = 52.f;
 }
 
 HudEditor::HudEditor()
-    : Module("hud_editor", "Éditeur de HUD", ModuleCategory::Client,
-             "Placement libre, grille, alignement et groupes.") {
-    markEssential();
+    : Module("hud_editor", "HUD editor", ModuleCategory::Client,
+             "Free placement, grid, alignment and groups.") {
+    markInterfaceModule();
 
     keybind() = config().hudEditorKey;
 
-    settings.header("Grille");
-    settings.toggle("showGrid", "Afficher la grille", true);
-    settings.intSlider("gridSize", "Pas de la grille", 8, 2, 64, "", " px");
-    settings.toggle("snapToGrid", "Aimanter à la grille", true);
-    settings.toggle("snapToEdges", "Aimanter aux autres éléments", true);
+    settings.header("Grid");
+    settings.toggle("showGrid", "Show the grid", true);
+    settings.intSlider("gridSize", "Grid step", 8, 2, 64, "", " px");
+    settings.toggle("snapToGrid", "Snap to the grid", true);
+    settings.toggle("snapToEdges", "Snap to other elements", true);
 
-    settings.header("Aide au placement");
-    settings.toggle("showBounds", "Encadrer les éléments", true);
-    settings.toggle("showNames", "Afficher les noms", true);
-    settings.toggle("dimGame", "Assombrir le jeu", true);
+    settings.header("Placement help");
+    settings.toggle("showBounds", "Outline the elements", true);
+    settings.toggle("showNames", "Show names", true);
+    settings.toggle("dimGame", "Dim the game", true);
 
     on(&HudEditor::onRender);
     on(&HudEditor::onMouse, EventPriority::First);
     on(&HudEditor::onKey, EventPriority::First);
 
-    addKeywords({"hud", "éditeur", "placement", "grille", "layout"});
+    addKeywords({"hud", "editor", "placement", "grid", "layout"});
 }
 
 void HudEditor::onEnable() {
@@ -54,9 +55,11 @@ void HudEditor::onEnable() {
 }
 
 void HudEditor::onDisable() {
-    WindowHook::setCaptureInput(false);
+    if (!modules().anyInterfaceOpen()) WindowHook::setCaptureInput(false);
     dragged_ = nullptr;
+
     profiles().saveCurrent();
+    ProfileManager::saveInterfaceState();
 }
 
 std::vector<HudModule*> HudEditor::movingGroup() const {
@@ -306,7 +309,7 @@ void HudEditor::drawSelection(Renderer& renderer, HudModule& element) {
         }
     }
 
-    renderer.text(name, Rect{bar.left + 30.f, bar.top, bar.left + 30.f + nameWidth + 4.f,
+    renderer.text(tr(name), Rect{bar.left + 30.f, bar.top, bar.left + 30.f + nameWidth + 4.f,
                              bar.bottom},
                   active.text, label);
 
@@ -353,7 +356,7 @@ void HudEditor::drawBottomBar(Renderer& renderer, Vec2 screenSize) {
 
     gui.panel(bar, active.panelRadius, true);
 
-    gui.text("Éditeur de HUD", Rect{bar.left + 18.f, bar.top, bar.left + 130.f, bar.bottom},
+    gui.text("HUD editor", Rect{bar.left + 18.f, bar.top, bar.left + 130.f, bar.bottom},
              active.text, 12.5f, FontWeight::SemiBold);
 
     renderer.line({bar.left + 140.f, bar.top + 12.f}, {bar.left + 140.f, bar.bottom - 12.f},
@@ -363,7 +366,7 @@ void HudEditor::drawBottomBar(Renderer& renderer, Vec2 screenSize) {
     if (gui.chip(UiId("editor_grid"),
                  Rect{bar.left + 152.f, bar.center().y - 15.f, bar.left + 224.f,
                       bar.center().y + 15.f},
-                 "Grille", showGrid)) {
+                 "Grid", showGrid)) {
         settings.set("showGrid", SettingValue{!showGrid});
     }
 
@@ -371,7 +374,7 @@ void HudEditor::drawBottomBar(Renderer& renderer, Vec2 screenSize) {
     if (gui.chip(UiId("editor_snap"),
                  Rect{bar.left + 230.f, bar.center().y - 15.f, bar.left + 300.f,
                       bar.center().y + 15.f},
-                 "Aimant", snapGrid)) {
+                 "Snap", snapGrid)) {
         settings.set("snapToGrid", SettingValue{!snapGrid});
     }
 
@@ -402,11 +405,11 @@ void HudEditor::drawBottomBar(Renderer& renderer, Vec2 screenSize) {
     if (gui.button(UiId("editor_done"),
                    Rect{bar.right - 108.f, bar.center().y - 15.f, bar.right - 16.f,
                         bar.center().y + 15.f},
-                   "Terminé", true)) {
+                   "Done", true)) {
         setEnabled(false);
     }
 
-    gui.text("Glissez pour déplacer · Maj + flèches pour ajuster au pixel · Échap pour sortir",
+    gui.text("Drag to move · Shift + arrows to nudge · Esc to leave",
              Rect{bar.left - 60.f, bar.top - 26.f, bar.right + 60.f, bar.top - 6.f},
              active.textDim, 11.f, FontWeight::Regular, TextAlign::Center);
 }

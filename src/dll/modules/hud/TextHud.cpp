@@ -12,11 +12,11 @@ TextHud::TextHud(std::string id, std::string name, std::string description, Vec2
                 defaultAnchor) {}
 
 void TextHud::addTextSettings(bool defaultShowLabel) {
-    settings.header("Contenu");
-    settings.toggle("showLabel", "Afficher les libellés", defaultShowLabel);
-    settings.toggle("labelAccent", "Libellés en couleur d'accent", true);
-    settings.dropdown("textAlign", "Alignement", "Gauche", {"Gauche", "Centre", "Droite"});
-    settings.slider("lineSpacing", "Interligne", 1.15f, 0.8f, 2.f, "", "x");
+    settings.header("Content");
+    settings.toggle("showLabel", "Show labels", defaultShowLabel);
+    settings.toggle("labelAccent", "Labels in the accent colour", true);
+    settings.dropdown("textAlign", "Alignment", "Left", {"Left", "Centre", "Right"});
+    settings.slider("lineSpacing", "Line spacing", 1.15f, 0.8f, 2.f, "", "x");
 
     if (Setting* accent = settings.find("labelAccent")) {
         accent->visibleWhen = [this] { return settings.value<bool>("showLabel", true); };
@@ -66,7 +66,7 @@ void TextHud::drawContent(Renderer& renderer, const Rect& content) {
     const bool showLabel = settings.value<bool>("showLabel", true);
     const bool labelAccent = settings.value<bool>("labelAccent", true);
     const bool shadow = settings.value<bool>("textShadow", false);
-    const std::string align = settings.value<std::string>("textAlign", "Gauche");
+    const std::string align = settings.value<std::string>("textAlign", "Left");
 
     const Color baseText = textColor();
     const Color labelColor = labelAccent ? active.liveAccent() : baseText.fade(0.7f);
@@ -85,7 +85,7 @@ void TextHud::drawContent(Renderer& renderer, const Rect& content) {
         float x = content.left;
         if (align == "Centre") {
             x = content.left + (content.width() - rowWidth) * 0.5f;
-        } else if (align == "Droite") {
+        } else if (align == "Right") {
             x = content.right - rowWidth;
         }
 

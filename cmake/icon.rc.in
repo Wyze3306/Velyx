@@ -1,0 +1,4 @@
+// Windows resource script for the Velyx mark, configured by CMake with the path to
+// assets/velyx.ico. Explorer, the taskbar and Alt+Tab all read the lowest numbered
+// icon group, so the mark keeps id 1 in both the launcher and the client DLL.
+1 ICON "@VELYX_ICON_FILE@"

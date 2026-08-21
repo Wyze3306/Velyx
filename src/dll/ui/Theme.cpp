@@ -16,7 +16,7 @@ namespace {
 constexpr const char* kLog = "Theme";
 constexpr const char* kExtension = ".velyxtheme";
 
-const char* kBuiltInNames[] = {"Velyx", "Velyx Light", "Nuit", "Contrast"};
+const char* kBuiltInNames[] = {"Velyx", "Velyx Light", "Night", "Contrast"};
 
 nlohmann::json colorToJson(const Color& color) { return color.toHex(true); }
 
@@ -200,12 +200,12 @@ bool ThemeManager::isBuiltIn(const std::string& name) {
 
 void ThemeManager::registerBuiltIns() {
     Theme velyx;
-    velyx.description = "Surfaces graphite, accent menthe. Le thème par défaut.";
+    velyx.description = "Graphite surfaces, mint accent. The default theme.";
     themes_.push_back(velyx);
 
     Theme light = velyx;
     light.name = "Velyx Light";
-    light.description = "La même grammaire, sur fond clair.";
+    light.description = "The same grammar, on a light background.";
     light.background = Color::rgb8(247, 248, 249);
     light.backgroundDeep = Color::rgb8(233, 236, 238);
     light.surface = Color::rgb8(255, 255, 255);
@@ -222,8 +222,8 @@ void ThemeManager::registerBuiltIns() {
     themes_.push_back(light);
 
     Theme contrast = velyx;
-    contrast.name = "Nuit";
-    contrast.description = "Plus sombre et plus serré, pour le PvP.";
+    contrast.name = "Night";
+    contrast.description = "Darker and tighter, for PvP.";
     contrast.background = Color::rgb8(10, 11, 13);
     contrast.backgroundDeep = Color::rgb8(0, 0, 0);
     contrast.surface = Color::rgb8(18, 20, 23);
@@ -239,7 +239,7 @@ void ThemeManager::registerBuiltIns() {
 
     Theme access = velyx;
     access.name = "Contrast";
-    access.description = "Sans animation ni flou, contraste maximal.";
+    access.description = "No animation, no blur, maximum contrast.";
     access.background = Color::rgb8(0, 0, 0);
     access.backgroundDeep = Color::rgb8(0, 0, 0);
     access.surface = Color::rgb8(20, 20, 20);
@@ -282,7 +282,7 @@ void ThemeManager::load() {
         Theme theme = deserialize(json);
         if (theme.name.empty()) theme.name = entry.path().stem().string();
 
-        if (isBuiltIn(theme.name)) theme.name += " (copie)";
+        if (isBuiltIn(theme.name)) theme.name += " (copy)";
 
         themes_.push_back(std::move(theme));
         ++loaded;
@@ -316,7 +316,7 @@ bool ThemeManager::apply(const std::string& name) {
 
 bool ThemeManager::save(const Theme& theme) {
     Theme copy = theme;
-    if (isBuiltIn(copy.name)) copy.name += " (copie)";
+    if (isBuiltIn(copy.name)) copy.name += " (copy)";
 
     std::error_code ec;
     std::filesystem::create_directories(Paths::themes(), ec);
@@ -385,6 +385,41 @@ bool ThemeManager::importFrom(const std::filesystem::path& source, std::string* 
     if (theme.name.empty()) theme.name = source.stem().string();
 
     if (!save(theme)) return false;
+    if (importedName) *importedName = theme.name;
+    return true;
+}
+
+std::string ThemeManager::exportCode() const {
+    return "VELYXTHEME1:" + strings::base64Encode(serialize(current_).dump());
+}
+
+bool ThemeManager::importCode(std::string_view code, std::string* importedName) {
+    constexpr std::string_view kPrefix = "VELYXTHEME1:";
+
+    std::string_view body = strings::trim(code);
+    if (!strings::startsWith(body, kPrefix)) {
+        Log::warn(kLog, "unrecognised theme code");
+        return false;
+    }
+    body.remove_prefix(kPrefix.size());
+
+    const auto decoded = strings::base64Decode(body);
+    if (!decoded) {
+        Log::warn(kLog, "theme code is corrupt");
+        return false;
+    }
+
+    Theme theme;
+    try {
+        theme = deserialize(nlohmann::json::parse(*decoded));
+    } catch (const std::exception& e) {
+        Log::warn(kLog, "theme code could not be parsed: {}", e.what());
+        return false;
+    }
+
+    if (theme.name.empty()) theme.name = "Theme imported";
+    if (!save(theme)) return false;
+
     if (importedName) *importedName = theme.name;
     return true;
 }

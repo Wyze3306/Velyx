@@ -16,34 +16,34 @@ namespace {
 class Crosshair final : public HudModule {
 public:
     Crosshair()
-        : HudModule("crosshair", "Viseur", "Viseur personnalisé, forme, couleur et écartement.",
+        : HudModule("crosshair", "Crosshair", "A crosshair of your own: shape, colour and gap.",
                     {0.5f, 0.5f}, HudAnchor::Center) {
         settings.set("background", SettingValue{false});
         settings.set("shadow", SettingValue{false});
         settings.set("padding", SettingValue{0.f});
 
-        settings.header("Forme");
-        settings.dropdown("style", "Style", "Croix",
-                          {"Croix", "Croix + point", "Point", "Cercle", "T inversé", "Crochets"});
-        settings.slider("length", "Longueur des branches", 7.f, 1.f, 30.f, "", "px");
-        settings.slider("gap", "Écart central", 4.f, 0.f, 24.f, "", "px");
-        settings.slider("thickness", "Épaisseur", 2.f, 1.f, 8.f, "", "px");
-        settings.slider("dotSize", "Taille du point", 2.f, 0.5f, 10.f, "", "px");
+        settings.header("Shape");
+        settings.dropdown("style", "Style", "Cross",
+                          {"Cross", "Cross + dot", "Dot", "Circle", "Inverted T", "Brackets"});
+        settings.slider("length", "Arm length", 7.f, 1.f, 30.f, "", "px");
+        settings.slider("gap", "Centre gap", 4.f, 0.f, 24.f, "", "px");
+        settings.slider("thickness", "Thickness", 2.f, 1.f, 8.f, "", "px");
+        settings.slider("dotSize", "Dot size", 2.f, 0.5f, 10.f, "", "px");
 
-        settings.header("Couleurs");
-        settings.toggle("useThemeAccent", "Couleur du thème", false);
-        settings.color("color", "Couleur", Color::rgb8(255, 255, 255, 230));
-        settings.toggle("outline", "Contour", true);
-        settings.color("outlineColor", "Couleur du contour", Color::rgb8(0, 0, 0, 160));
-        settings.toggle("hitFlash", "Éclair sur touche", true);
-        settings.color("hitColor", "Couleur de touche", palette::kMint);
-        settings.slider("hitDuration", "Durée de l'éclair", 0.25f, 0.05f, 1.f, "", " s");
+        settings.header("Colours");
+        settings.toggle("useThemeAccent", "Theme colour", false);
+        settings.color("color", "Colour", Color::rgb8(255, 255, 255, 230));
+        settings.toggle("outline", "Outline", true);
+        settings.color("outlineColor", "Outline colour", Color::rgb8(0, 0, 0, 160));
+        settings.toggle("hitFlash", "Flash on hit", true);
+        settings.color("hitColor", "Hit colour", palette::kMint);
+        settings.slider("hitDuration", "Flash duration", 0.25f, 0.05f, 1.f, "", " s");
 
-        settings.header("Dynamique");
-        settings.toggle("dynamic", "Écartement dynamique", false,
-                        "Le viseur s'ouvre en mouvement et se referme à l'arrêt.");
-        settings.slider("spread", "Amplitude", 6.f, 1.f, 24.f, "", "px");
-        settings.toggle("hideInMenus", "Masquer dans les menus", true);
+        settings.header("Dynamic");
+        settings.toggle("dynamic", "Dynamic gap", false,
+                        "The crosshair opens as you move and closes when you stop.");
+        settings.slider("spread", "Amount", 6.f, 1.f, 24.f, "", "px");
+        settings.toggle("hideInMenus", "Hide in menus", true);
 
         settings.find("color")->visibleWhen = [this] {
             return !settings.value<bool>("useThemeAccent", false);
@@ -61,12 +61,12 @@ public:
             return settings.value<bool>("dynamic", false);
         };
         settings.find("dotSize")->visibleWhen = [this] {
-            const std::string style = settings.value<std::string>("style", "Croix");
-            return style == "Point" || style == "Croix + point";
+            const std::string style = settings.value<std::string>("style", "Cross");
+            return style == "Dot" || style == "Cross + dot";
         };
 
         on(&Crosshair::onActorHurt);
-        addKeywords({"viseur", "crosshair", "réticule", "mire"});
+        addKeywords({"crosshair", "reticle"});
     }
 
     bool relevantNow() const override {
@@ -86,7 +86,7 @@ public:
         const float length = settings.value<float>("length", 7.f) * scale();
         const float gap = currentGap();
         const float thickness = settings.value<float>("thickness", 2.f) * scale();
-        const std::string style = settings.value<std::string>("style", "Croix");
+        const std::string style = settings.value<std::string>("style", "Cross");
 
         hit_.speed = 8.f / std::max(0.05f, settings.value<float>("hitDuration", 0.25f));
         hit_.to(0.f);
@@ -119,13 +119,13 @@ public:
             bars.push_back(Rect{x0, y0, x1, y1});
         };
 
-        const bool wantsArms = style == "Croix" || style == "Croix + point" ||
-                               style == "T inversé" || style == "Crochets";
+        const bool wantsArms = style == "Cross" || style == "Cross + dot" ||
+                               style == "Inverted T" || style == "Brackets";
 
         if (wantsArms) {
             const float half = thickness * 0.5f;
 
-            if (style != "T inversé") {
+            if (style != "Inverted T") {
                 addBar(centre.x - gap - length, centre.y - half, centre.x - gap, centre.y + half);
                 addBar(centre.x + gap, centre.y - half, centre.x + gap + length, centre.y + half);
                 addBar(centre.x - half, centre.y - gap - length, centre.x + half, centre.y - gap);
@@ -137,7 +137,7 @@ public:
             addBar(centre.x - half, centre.y + gap, centre.x + half, centre.y + gap + length);
         }
 
-        if (style == "Crochets") {
+        if (style == "Brackets") {
             const float tip = length * 0.5f;
             const float half = thickness * 0.5f;
             addBar(centre.x - gap - length, centre.y - gap - length,
@@ -160,13 +160,13 @@ public:
             renderer.fillRounded(bar, colour, thickness * 0.35f);
         }
 
-        if (style == "Cercle") {
+        if (style == "Circle") {
             const float radius = gap + length * 0.5f;
             if (outline) renderer.strokeCircle(centre, radius, outlineColour, outlineWidth);
             renderer.strokeCircle(centre, radius, colour, thickness);
         }
 
-        if (style == "Point" || style == "Croix + point") {
+        if (style == "Dot" || style == "Cross + dot") {
             const float dot = settings.value<float>("dotSize", 2.f) * scale();
             if (outline) renderer.fillCircle(centre, dot + 1.f, outlineColour);
             renderer.fillCircle(centre, dot, colour);

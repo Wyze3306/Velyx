@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <list>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -72,6 +73,16 @@ private:
 
     void rebuildCollection();
 
+    // A family name paired with the collection it was actually found in: the bundled
+    // one, or the system's when `collection` is null.
+    struct ResolvedFamily {
+        std::wstring name;
+        IDWriteFontCollection* collection = nullptr;
+    };
+
+    const ResolvedFamily& resolve(const std::string& family);
+    IDWriteFontCollection* systemCollection();
+
     struct LayoutKey {
         std::string text;
         FontSpec spec;
@@ -114,7 +125,9 @@ private:
     ComPtr<IDWriteFactory5> factory_;
     ComPtr<IDWriteFontSetBuilder1> setBuilder_;
     ComPtr<IDWriteFontCollection1> collection_;
+    ComPtr<IDWriteFontCollection> systemCollection_;
     std::vector<std::string> bundledFamilies_;
+    std::unordered_map<std::string, ResolvedFamily> resolved_;
 
     std::unordered_map<FormatKey, ComPtr<IDWriteTextFormat>, FormatKeyHash> formats_;
 

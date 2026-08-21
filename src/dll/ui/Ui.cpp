@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include "core/Lang.hpp"
 #include "core/Strings.hpp"
 #include "dll/ui/Theme.hpp"
 
@@ -11,7 +12,7 @@ namespace velyx {
 namespace {
 
 constexpr float kRowLabelSize = 14.f;
-constexpr float kRowDescriptionSize = 11.5f;
+constexpr float kRowDescriptionSize = 12.f;
 constexpr float kSwitchWidth = 34.f;
 constexpr float kSwitchHeight = 20.f;
 
@@ -182,14 +183,14 @@ void Ui::panel(const Rect& rect, float radius, bool blur) {
 
 void Ui::text(std::string_view value, const Rect& bounds, const Color& color, float size,
               FontWeight weight, TextAlign align) {
-    renderer_->text(value, bounds, color, makeFont(size, weight, align, TextVAlign::Middle));
+    renderer_->text(tr(value), bounds, color, makeFont(size, weight, align, TextVAlign::Middle));
 }
 
 void Ui::sectionHeader(std::string_view label, const Rect& bounds) {
     const auto& active = theme();
 
     const Rect labelRect{bounds.left, bounds.top, bounds.right, bounds.bottom};
-    renderer_->text(strings::toUpper(label), labelRect, active.textMuted.fade(0.85f),
+    renderer_->text(strings::toUpper(std::string(tr(label))), labelRect, active.textMuted.fade(0.85f),
                     makeFont(11.f, FontWeight::Bold, TextAlign::Left, TextVAlign::Middle));
 
     const float textWidth =
@@ -231,7 +232,7 @@ bool Ui::button(const UiId& id, const Rect& rect, std::string_view label, bool p
                                  active.borderWidth);
     }
 
-    renderer_->text(label, rect, foreground,
+    renderer_->text(tr(label), rect, foreground,
                     makeFont(12.5f, FontWeight::SemiBold, TextAlign::Center, TextVAlign::Middle));
 
     return pressed;
@@ -297,14 +298,14 @@ bool Ui::toggleRow(const UiId& id, const Rect& rect, std::string_view label,
     const Rect labelRect{rect.left + inset, rect.top + (hasDescription ? 6.f : 0.f),
                          rect.right - kSwitchWidth - inset * 2.f,
                          hasDescription ? rect.top + rect.height() * 0.55f : rect.bottom};
-    renderer_->text(label, labelRect, active.text,
+    renderer_->text(tr(label), labelRect, active.text,
                     makeFont(kRowLabelSize, FontWeight::Medium, TextAlign::Left,
                              hasDescription ? TextVAlign::Middle : TextVAlign::Middle));
 
     if (hasDescription) {
         const Rect descriptionRect{labelRect.left, rect.top + rect.height() * 0.5f,
                                    labelRect.right, rect.bottom - 5.f};
-        renderer_->text(description, descriptionRect, active.textMuted,
+        renderer_->text(tr(description), descriptionRect, active.textMuted,
                         makeFont(kRowDescriptionSize, FontWeight::Regular, TextAlign::Left,
                                  TextVAlign::Middle));
     }
@@ -354,7 +355,7 @@ bool Ui::slider(const UiId& id, const Rect& rect, float& value, float minimum, f
     if (!suffix.empty() || hover > 0.01f) {
         const std::string label =
             strings::formatFloat(value, step >= 1.f ? 0 : 2) + std::string(suffix);
-        renderer_->text(label, Rect{rect.left, rect.top - 18.f, rect.right, rect.top},
+        renderer_->text(tr(label), Rect{rect.left, rect.top - 18.f, rect.right, rect.top},
                         active.textMuted.fade(0.6f + hover * 0.4f),
                         makeFont(11.f, FontWeight::Medium, TextAlign::Right, TextVAlign::Middle));
     }
@@ -370,7 +371,7 @@ bool Ui::sliderRow(const UiId& id, const Rect& rect, std::string_view label,
 
     const Rect labelRect{rect.left + inset, rect.top, rect.right - inset,
                          rect.top + rect.height() * 0.45f};
-    renderer_->text(label, labelRect, active.text,
+    renderer_->text(tr(label), labelRect, active.text,
                     makeFont(kRowLabelSize, FontWeight::Medium, TextAlign::Left, TextVAlign::Middle));
 
     const std::string valueText =
@@ -399,7 +400,7 @@ bool Ui::dropdown(const UiId& id, const Rect& rect, std::string& value,
                              active.radius, active.borderWidth);
 
     const float inset = active.spacing;
-    renderer_->text(value, Rect{rect.left + inset, rect.top, rect.right - 20.f, rect.bottom},
+    renderer_->text(tr(value), Rect{rect.left + inset, rect.top, rect.right - 20.f, rect.bottom},
                     active.text, makeFont(13.f, FontWeight::Medium, TextAlign::Left,
                                           TextVAlign::Middle));
 
@@ -440,7 +441,7 @@ bool Ui::dropdown(const UiId& id, const Rect& rect, std::string& value,
                                    active.radius * 0.7f);
         }
 
-        renderer_->text(options[i], Rect{item.left + 8.f, item.top, item.right, item.bottom},
+        renderer_->text(tr(options[i]), Rect{item.left + 8.f, item.top, item.right, item.bottom},
                         selected ? active.liveAccent() : active.text,
                         makeFont(13.f, selected ? FontWeight::SemiBold : FontWeight::Regular,
                                  TextAlign::Left, TextVAlign::Middle));
@@ -457,6 +458,11 @@ bool Ui::dropdown(const UiId& id, const Rect& rect, std::string& value,
     if (clicked_ && !list.contains(mouse_) && !rect.contains(mouse_)) openDropdown_ = UiId{};
 
     return changed;
+}
+
+void Ui::focusText(const UiId& id) {
+    focused_ = id;
+    focusedText_ = true;
 }
 
 bool Ui::textField(const UiId& id, const Rect& rect, std::string& value,
@@ -509,7 +515,7 @@ bool Ui::textField(const UiId& id, const Rect& rect, std::string& value,
     const Rect inner{rect.left + active.spacing, rect.top, rect.right - active.spacing, rect.bottom};
     const bool showPlaceholder = value.empty() && !placeholder.empty();
 
-    renderer_->text(showPlaceholder ? placeholder : value, inner,
+    renderer_->text(showPlaceholder ? tr(placeholder) : std::string_view(value), inner,
                     showPlaceholder ? active.textMuted.fade(0.7f) : active.text,
                     makeFont(13.f, FontWeight::Regular, TextAlign::Left, TextVAlign::Middle));
 
@@ -635,7 +641,7 @@ bool Ui::colorRow(const UiId& id, const Rect& rect, std::string_view label, Colo
         renderer_->fillRounded(rect, active.surfaceHover.fade(0.5f * hover), active.radius);
     }
 
-    renderer_->text(label, Rect{rect.left + inset, rect.top, rect.right - 60.f, rect.bottom},
+    renderer_->text(tr(label), Rect{rect.left + inset, rect.top, rect.right - 60.f, rect.bottom},
                     active.text,
                     makeFont(kRowLabelSize, FontWeight::Medium, TextAlign::Left, TextVAlign::Middle));
 
@@ -698,7 +704,7 @@ bool Ui::keybindField(const UiId& id, const Rect& rect, Keybind& value) {
     renderer_->strokeRounded(rect, capturing ? active.liveAccent() : active.border.fade(0.5f + glow * 0.4f),
                              active.radius, active.borderWidth);
 
-    renderer_->text(capturing ? "Appuyez sur une touche…" : describeKeybind(value), rect,
+    renderer_->text(capturing ? tr("Press a key…") : std::string_view(describeKeybind(value)), rect,
                     capturing ? active.liveAccent() : active.text,
                     makeFont(12.5f, FontWeight::Medium, TextAlign::Center, TextVAlign::Middle));
 
@@ -732,7 +738,7 @@ int Ui::segmented(const UiId& id, const Rect& rect, const std::vector<std::strin
         if (hoverAndClick(itemId, item)) result = static_cast<int>(i);
 
         const bool isSelected = static_cast<int>(i) == selected;
-        renderer_->text(options[i], item,
+        renderer_->text(tr(options[i]), item,
                         isSelected ? active.liveAccent().readableForeground() : active.textMuted,
                         makeFont(12.5f, isSelected ? FontWeight::SemiBold : FontWeight::Medium,
                                  TextAlign::Center, TextVAlign::Middle));
@@ -758,7 +764,7 @@ bool Ui::chip(const UiId& id, const Rect& rect, std::string_view label, bool sel
     }
 
     const Color idle = lerp(active.textDim, active.text, hover);
-    renderer_->text(label, rect, lerp(idle, active.liveAccent(), on),
+    renderer_->text(tr(label), rect, lerp(idle, active.liveAccent(), on),
                     makeFont(12.f, selected ? FontWeight::SemiBold : FontWeight::Medium,
                              TextAlign::Center, TextVAlign::Middle));
 

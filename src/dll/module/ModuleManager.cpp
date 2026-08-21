@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "core/Lang.hpp"
 #include "core/Log.hpp"
 #include "core/Strings.hpp"
 
@@ -38,7 +39,8 @@ void ModuleManager::initialize() {
 }
 
 void ModuleManager::shutdown() {
-    disableAll();
+    disableAll(Interfaces::Include);
+    shortcuts_.clear();
     {
         const std::lock_guard<std::mutex> guard(pendingMutex_);
         pendingToggles_.clear();
@@ -96,11 +98,18 @@ std::vector<ModuleManager::SearchHit> ModuleManager::search(std::string_view que
     for (const auto& module : modules_) {
         int best = -1;
 
-        if (const auto score = strings::fuzzyScore(query, module->name())) {
-            best = std::max(best, *score + 40);
+        // Both languages are searched: the names live in the source in English, but
+        // what the reader has in front of them is whatever the table says.
+        for (const std::string_view name : {std::string_view(module->name()), tr(module->name())}) {
+            if (const auto score = strings::fuzzyScore(query, name)) {
+                best = std::max(best, *score + 40);
+            }
         }
-        if (const auto score = strings::fuzzyScore(query, module->description())) {
-            best = std::max(best, *score - 10);
+        for (const std::string_view text :
+             {std::string_view(module->description()), tr(module->description())}) {
+            if (const auto score = strings::fuzzyScore(query, text)) {
+                best = std::max(best, *score - 10);
+            }
         }
         for (const std::string& keyword : module->keywords()) {
             if (const auto score = strings::fuzzyScore(query, keyword)) {
@@ -114,8 +123,11 @@ std::vector<ModuleManager::SearchHit> ModuleManager::search(std::string_view que
             if (!setting.hasValue() || setting.label.empty()) continue;
 
             int settingScore = -1;
-            if (const auto score = strings::fuzzyScore(query, setting.label)) {
-                settingScore = std::max(settingScore, *score);
+            for (const std::string_view label :
+                 {std::string_view(setting.label), tr(setting.label)}) {
+                if (const auto score = strings::fuzzyScore(query, label)) {
+                    settingScore = std::max(settingScore, *score);
+                }
             }
             for (const std::string& keyword : setting.keywords) {
                 if (const auto score = strings::fuzzyScore(query, keyword)) {
@@ -138,7 +150,25 @@ std::vector<ModuleManager::SearchHit> ModuleManager::search(std::string_view que
     return hits;
 }
 
+bool ModuleManager::anyInterfaceOpen() const {
+    return std::ranges::any_of(modules_, [](const std::unique_ptr<Module>& module) {
+        return module->isInterfaceModule() && module->enabled();
+    });
+}
+
 void ModuleManager::handleKey(const KeyEvent& event) {
+    if (event.down && !event.repeat) {
+        for (const Shortcut& shortcut : shortcuts_) {
+            const Keybind& bind = *shortcut.bind;
+            if (!bind.bound() || bind.key != event.key) continue;
+            if (bind.ctrl != event.ctrl || bind.shift != event.shift || bind.alt != event.alt) {
+                continue;
+            }
+
+            shortcut.action();
+        }
+    }
+
     for (const auto& module : modules_) {
         const Keybind& bind = module->keybind();
         if (!bind.bound() || bind.key != event.key) continue;
@@ -164,6 +194,11 @@ void ModuleManager::handleKey(const KeyEvent& event) {
                 break;
         }
     }
+}
+
+void ModuleManager::addShortcut(const Keybind* bind, std::function<void()> action) {
+    if (!bind || !action) return;
+    shortcuts_.push_back(Shortcut{bind, std::move(action)});
 }
 
 void ModuleManager::requestEnabled(Module* module, bool enabled) {
@@ -200,22 +235,43 @@ void ModuleManager::setSafeMode(bool safeMode) {
     Log::warn(kLog, "safe mode: disabled {} module(s)", disabled);
 }
 
-void ModuleManager::disableAll() {
+void ModuleManager::disableAll(Interfaces interfaces) {
     for (const auto& module : modules_) {
-        if (module->enabled()) module->setEnabled(false, false);
+        if (!module->enabled()) continue;
+        if (interfaces == Interfaces::Leave && module->isInterfaceModule()) continue;
+
+        module->setEnabled(false, false);
     }
 }
 
-nlohmann::json ModuleManager::save() const {
+namespace {
+
+bool inScope(const Module& module, ModuleManager::Interfaces which) {
+    switch (which) {
+        case ModuleManager::Interfaces::Leave:   return !module.isInterfaceModule();
+        case ModuleManager::Interfaces::Only:    return module.isInterfaceModule();
+        case ModuleManager::Interfaces::Include: return true;
+    }
+    return true;
+}
+
+}
+
+nlohmann::json ModuleManager::save(Interfaces which) const {
     nlohmann::json json = nlohmann::json::object();
-    for (const auto& module : modules_) json[module->id()] = module->save();
+    for (const auto& module : modules_) {
+        if (!inScope(*module, which)) continue;
+        json[module->id()] = module->save();
+    }
     return json;
 }
 
-void ModuleManager::load(const nlohmann::json& json) {
+void ModuleManager::load(const nlohmann::json& json, Interfaces which) {
     if (!json.is_object()) return;
 
     for (const auto& module : modules_) {
+        if (!inScope(*module, which)) continue;
+
         const auto it = json.find(module->id());
         if (it == json.end()) continue;
 

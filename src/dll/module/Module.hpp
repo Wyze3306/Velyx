@@ -68,6 +68,11 @@ public:
 
     [[nodiscard]] bool essential() const { return essential_; }
 
+    // An interface is on screen or it is not, and that is where the resemblance to a
+    // module ends: its state belongs to the session, never to a profile, and nothing
+    // that swaps a profile in or out is allowed to open or close it.
+    [[nodiscard]] bool isInterfaceModule() const { return interfaceModule_; }
+
     [[nodiscard]] bool experimental() const { return experimental_; }
 
     [[nodiscard]] const ModulePermissions& permissions() const { return permissions_; }
@@ -97,6 +102,10 @@ protected:
     }
 
     void markEssential() { essential_ = true; }
+    void markInterfaceModule() {
+        interfaceModule_ = true;
+        essential_ = true;
+    }
     void markExperimental() { experimental_ = true; }
     ModulePermissions& mutablePermissions() { return permissions_; }
 
@@ -118,6 +127,7 @@ private:
     bool enabled_ = false;
     bool favourite_ = false;
     bool essential_ = false;
+    bool interfaceModule_ = false;
     bool experimental_ = false;
 };
 

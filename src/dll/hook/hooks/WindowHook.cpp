@@ -154,23 +154,23 @@ bool WindowHook::isKeyDown(int virtualKey) {
 
 std::string WindowHook::keyName(int virtualKey) {
     switch (virtualKey) {
-        case 0:            return "Aucune";
-        case VK_LBUTTON:   return "Clic gauche";
-        case VK_RBUTTON:   return "Clic droit";
-        case VK_MBUTTON:   return "Clic molette";
-        case VK_XBUTTON1:  return "Souris 4";
-        case VK_XBUTTON2:  return "Souris 5";
-        case VK_SPACE:     return "Espace";
-        case VK_ESCAPE:    return "Échap";
-        case VK_RETURN:    return "Entrée";
+        case 0:            return "None";
+        case VK_LBUTTON:   return "Left click";
+        case VK_RBUTTON:   return "Right click";
+        case VK_MBUTTON:   return "Middle click";
+        case VK_XBUTTON1:  return "Mouse 4";
+        case VK_XBUTTON2:  return "Mouse 5";
+        case VK_SPACE:     return "Space";
+        case VK_ESCAPE:    return "Esc";
+        case VK_RETURN:    return "Enter";
         case VK_TAB:       return "Tab";
-        case VK_BACK:      return "Retour";
-        case VK_LSHIFT:    return "Maj gauche";
-        case VK_RSHIFT:    return "Maj droite";
-        case VK_LCONTROL:  return "Ctrl gauche";
-        case VK_RCONTROL:  return "Ctrl droit";
-        case VK_LMENU:     return "Alt gauche";
-        case VK_RMENU:     return "Alt droit";
+        case VK_BACK:      return "Back";
+        case VK_LSHIFT:    return "Left Shift";
+        case VK_RSHIFT:    return "Right Shift";
+        case VK_LCONTROL:  return "Left Ctrl";
+        case VK_RCONTROL:  return "Right Ctrl";
+        case VK_LMENU:     return "Left Alt";
+        case VK_RMENU:     return "Right Alt";
         default:           break;
     }
 

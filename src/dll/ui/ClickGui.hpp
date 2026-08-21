@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 
 #include "dll/module/Module.hpp"
@@ -14,6 +15,10 @@ public:
 
     void onEnable() override;
     void onDisable() override;
+
+    // Opens the menu on the module list with the caret already in the search field,
+    // which is what the search key does from anywhere in the game.
+    void openOnSearch();
 
 private:
     enum class Page { Modules, Themes, Profiles, Keybinds, Diagnostics, History, Captures };
@@ -51,6 +56,11 @@ private:
     Module* selected_ = nullptr;
 
     std::string search_;
+
+    // Set from the message thread by the search key, read and cleared by the frame:
+    // page_ and the rest of the interface state belong to the render thread.
+    std::atomic<bool> searchRequested_{false};
+    bool focusSearch_ = false;
     std::string profileCode_;
     std::string newProfileName_;
 

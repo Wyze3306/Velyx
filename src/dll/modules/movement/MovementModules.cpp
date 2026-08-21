@@ -15,20 +15,20 @@ class Zoom final : public Module {
 public:
     Zoom()
         : Module("zoom", "Zoom", ModuleCategory::Movement,
-                 "Réduit le champ de vision tant que la touche est maintenue.") {
-        settings.slider("amount", "Facteur de zoom", 3.f, 1.2f, 12.f, "", "x");
-        settings.slider("smoothing", "Fluidité", 14.f, 1.f, 40.f,
-                        "Plus bas = transition plus lente.");
-        settings.toggle("reduceSensitivity", "Réduire la sensibilité", true,
-                        "Garde le même déplacement à l'écran quel que soit le zoom.");
-        settings.toggle("cinematic", "Zoom cinématique", false,
-                        "Ajoute une inertie à la caméra pendant le zoom.");
+                 "Narrows the field of view while the key is held.") {
+        settings.slider("amount", "Zoom factor", 3.f, 1.2f, 12.f, "", "x");
+        settings.slider("smoothing", "Smoothness", 14.f, 1.f, 40.f,
+                        "Lower is a slower transition.");
+        settings.toggle("reduceSensitivity", "Reduce sensitivity", true,
+                        "Keeps on-screen movement the same whatever the zoom.");
+        settings.toggle("cinematic", "Cinematic zoom", false,
+                        "Adds inertia to the camera while zoomed.");
 
         keybind() = Keybind{'C', false, false, false, Keybind::Mode::Hold};
 
         on(&Zoom::onFov);
         on(&Zoom::onTurn);
-        addKeywords({"zoom", "fov", "loupe"});
+        addKeywords({"zoom", "fov", "magnify"});
     }
 
     void onEnable() override { progress_.to(1.f); }
@@ -69,14 +69,14 @@ private:
 class FovChanger final : public Module {
 public:
     FovChanger()
-        : Module("fov_changer", "FOV personnalisé", ModuleCategory::Movement,
-                 "Permet un champ de vision au-delà des limites du jeu.") {
-        settings.slider("fov", "Champ de vision", 90.f, 30.f, 150.f, "", "°");
-        settings.toggle("overrideAll", "Ignorer les effets du jeu", false,
-                        "Neutralise aussi les variations dues au sprint ou aux potions.");
+        : Module("fov_changer", "Custom FOV", ModuleCategory::Movement,
+                 "Allows a field of view past the game's own limits.") {
+        settings.slider("fov", "Field of view", 90.f, 30.f, 150.f, "", "°");
+        settings.toggle("overrideAll", "Ignore the game's own effects", false,
+                        "Also cancels the swings from sprinting and potions.");
 
         on(&FovChanger::onFov, EventPriority::High);
-        addKeywords({"fov", "champ de vision", "field of view"});
+        addKeywords({"fov", "field of view"});
     }
 
 private:
@@ -91,13 +91,13 @@ private:
 class JavaDynamicFov final : public Module {
 public:
     JavaDynamicFov()
-        : Module("java_dynamic_fov", "FOV dynamique (Java)", ModuleCategory::Movement,
-                 "Élargit le champ de vision en sprint, comme sur Java Edition.") {
-        settings.slider("sprintBoost", "Effet du sprint", 1.15f, 1.f, 1.5f, "", "x");
-        settings.slider("speed", "Vitesse de transition", 8.f, 1.f, 30.f);
+        : Module("java_dynamic_fov", "Dynamic FOV (Java)", ModuleCategory::Movement,
+                 "Widens the field of view while sprinting, like Java Edition.") {
+        settings.slider("sprintBoost", "Sprint effect", 1.15f, 1.f, 1.5f, "", "x");
+        settings.slider("speed", "Transition speed", 8.f, 1.f, 30.f);
 
         on(&JavaDynamicFov::onFov, EventPriority::Low);
-        addKeywords({"fov", "sprint", "java", "dynamique"});
+        addKeywords({"fov", "sprint", "java", "dynamic"});
     }
 
 private:
@@ -117,10 +117,10 @@ private:
 class SensMultiplier final : public Module {
 public:
     SensMultiplier()
-        : Module("sens_multiplier", "Multiplicateur de sensibilité", ModuleCategory::Movement,
-                 "Ajuste finement la sensibilité au-delà du curseur du jeu.") {
-        settings.slider("multiplier", "Multiplicateur", 1.f, 0.05f, 5.f, "", "x");
-        settings.toggle("separateAxes", "Axes séparés", false);
+        : Module("sens_multiplier", "Sensitivity multiplier", ModuleCategory::Movement,
+                 "Tunes sensitivity beyond the game's own slider.") {
+        settings.slider("multiplier", "Multiplier", 1.f, 0.05f, 5.f, "", "x");
+        settings.toggle("separateAxes", "Separate axes", false);
         settings.slider("horizontal", "Horizontal", 1.f, 0.05f, 5.f, "", "x");
         settings.slider("vertical", "Vertical", 1.f, 0.05f, 5.f, "", "x");
 
@@ -130,7 +130,7 @@ public:
         settings.find("multiplier")->visibleWhen = [separate] { return !separate(); };
 
         on(&SensMultiplier::onTurn, EventPriority::High);
-        addKeywords({"sensibilité", "sensitivity", "dpi", "souris"});
+        addKeywords({"sensitivity", "dpi", "mouse"});
     }
 
 private:
@@ -150,10 +150,10 @@ class HeldKeyToggle : public Module {
 public:
     HeldKeyToggle(std::string id, std::string name, std::string description, int defaultKey)
         : Module(std::move(id), std::move(name), ModuleCategory::Movement, std::move(description)) {
-        settings.dropdown("mode", "Mode", "Bascule", {"Bascule", "Toujours actif"});
-        settings.toggle("cancelOnGui", "Suspendre dans les menus", true);
-        settings.intSlider("key", "Touche du jeu", defaultKey, 1, 255,
-                           "Touche que le jeu utilise réellement pour cette action.")
+        settings.dropdown("mode", "Mode", "Toggle", {"Toggle", "Always on"});
+        settings.toggle("cancelOnGui", "Pause in menus", true);
+        settings.intSlider("key", "Game key", defaultKey, 1, 255,
+                           "The key the game actually uses for this action.")
             .advanced = true;
 
         mutablePermissions().inputSynthesis = true;
@@ -184,14 +184,14 @@ private:
 class ToggleSprint final : public HeldKeyToggle {
 public:
     ToggleSprint()
-        : HeldKeyToggle("toggle_sprint", "Sprint automatique",
-                        "Maintient le sprint sans garder la touche enfoncée.", VK_CONTROL) {
-        addKeywords({"sprint", "course", "autosprint"});
+        : HeldKeyToggle("toggle_sprint", "Auto sprint",
+                        "Keeps sprinting without holding the key.", VK_CONTROL) {
+        addKeywords({"sprint", "running", "autosprint"});
     }
 
 protected:
     bool shouldHold() const override {
-        if (settings.value<std::string>("mode", "Bascule") == "Toujours actif") return true;
+        if (settings.value<std::string>("mode", "Toggle") == "Always on") return true;
         return sdk::game().player().valid && !sdk::game().inMenu();
     }
 };
@@ -199,9 +199,9 @@ protected:
 class ToggleSneak final : public HeldKeyToggle {
 public:
     ToggleSneak()
-        : HeldKeyToggle("toggle_sneak", "Accroupissement à bascule",
-                        "Reste accroupi sans maintenir la touche.", VK_SHIFT) {
-        addKeywords({"sneak", "accroupi", "shift"});
+        : HeldKeyToggle("toggle_sneak", "Toggle sneak",
+                        "Stays sneaking without holding the key.", VK_SHIFT) {
+        addKeywords({"sneak", "crouch", "shift"});
     }
 
 protected:
@@ -212,16 +212,16 @@ class FreeLook final : public Module {
 public:
     FreeLook()
         : Module("free_look", "FreeLook", ModuleCategory::Movement,
-                 "Regarde autour de soi sans changer la direction du personnage.") {
-        settings.toggle("thirdPerson", "Passer en vue à la 3e personne", true);
-        settings.slider("maxYaw", "Amplitude horizontale", 180.f, 45.f, 180.f, "", "°");
-        settings.toggle("returnSmoothly", "Retour progressif", true);
+                 "Look around without changing where you are headed.") {
+        settings.toggle("thirdPerson", "Switch to third person", true);
+        settings.slider("maxYaw", "Horizontal amount", 180.f, 45.f, 180.f, "", "°");
+        settings.toggle("returnSmoothly", "Ease back", true);
 
         keybind() = Keybind{VK_MENU, false, false, false, Keybind::Mode::Hold};
 
         on(&FreeLook::onTurn, EventPriority::High);
         on(&FreeLook::onPerspective);
-        addKeywords({"freelook", "perspective", "caméra"});
+        addKeywords({"freelook", "perspective", "camera"});
     }
 
     void onEnable() override {
@@ -258,16 +258,16 @@ class SnapLook final : public Module {
 public:
     SnapLook()
         : Module("snap_look", "SnapLook", ModuleCategory::Movement,
-                 "Fait pivoter la caméra d'un angle fixe en une pression.") {
+                 "Turns the camera by a fixed angle in one press.") {
         settings.slider("angle", "Angle", 180.f, 45.f, 180.f, "", "°");
-        settings.slider("duration", "Durée", 0.12f, 0.f, 0.6f,
-                        "0 = instantané.", " s");
-        settings.toggle("resetOnSecondPress", "Revenir à la seconde pression", true);
+        settings.slider("duration", "Duration", 0.12f, 0.f, 0.6f,
+                        "0 = instant.", " s");
+        settings.toggle("resetOnSecondPress", "Return on the second press", true);
 
         keybind() = Keybind{'V', false, false, false, Keybind::Mode::Once};
 
         on(&SnapLook::onFrame);
-        addKeywords({"snap", "180", "demi-tour"});
+        addKeywords({"snap", "180", "about-face"});
     }
 
     void onEnable() override {
@@ -305,18 +305,18 @@ private:
 class CinematicCamera final : public Module {
 public:
     CinematicCamera()
-        : Module("cinematic_camera", "Caméra cinématique", ModuleCategory::Movement,
-                 "Lisse les mouvements de caméra pour l'enregistrement.") {
-        settings.slider("smoothing", "Lissage", 0.75f, 0.05f, 0.98f);
-        settings.toggle("rollOnStrafe", "Inclinaison en pas chassé", false);
-        settings.slider("rollAmount", "Amplitude de l'inclinaison", 4.f, 0.5f, 15.f, "", "°");
+        : Module("cinematic_camera", "Cinematic camera", ModuleCategory::Movement,
+                 "Smooths camera movement for recording.") {
+        settings.slider("smoothing", "Smoothing", 0.75f, 0.05f, 0.98f);
+        settings.toggle("rollOnStrafe", "Tilt while strafing", false);
+        settings.slider("rollAmount", "Tilt amount", 4.f, 0.5f, 15.f, "", "°");
 
         settings.find("rollAmount")->visibleWhen = [this] {
             return settings.value<bool>("rollOnStrafe", false);
         };
 
         on(&CinematicCamera::onTurn, EventPriority::Low);
-        addKeywords({"cinématique", "cinematic", "lissage", "caméra"});
+        addKeywords({"cinematic", "smoothing", "camera"});
     }
 
 private:
@@ -337,25 +337,25 @@ private:
 class AutoPerspective final : public Module {
 public:
     AutoPerspective()
-        : Module("auto_perspective", "Perspective automatique", ModuleCategory::Movement,
-                 "Change de vue automatiquement selon la situation.") {
-        settings.dropdown("onSwim", "En nageant", "Aucune",
-                          {"Aucune", "1re personne", "3e personne", "3e personne avant"});
-        settings.dropdown("onElytra", "En elytra", "3e personne",
-                          {"Aucune", "1re personne", "3e personne", "3e personne avant"});
-        settings.dropdown("onRide", "En monture", "Aucune",
-                          {"Aucune", "1re personne", "3e personne", "3e personne avant"});
-        settings.toggle("restore", "Restaurer la vue précédente", true);
+        : Module("auto_perspective", "Automatic perspective", ModuleCategory::Movement,
+                 "Switches view on its own depending on what you are doing.") {
+        settings.dropdown("onSwim", "While swimming", "None",
+                          {"None", "First person", "Third person", "Third person front"});
+        settings.dropdown("onElytra", "On elytra", "Third person",
+                          {"None", "First person", "Third person", "Third person front"});
+        settings.dropdown("onRide", "While riding", "None",
+                          {"None", "First person", "Third person", "Third person front"});
+        settings.toggle("restore", "Restore the previous view", true);
 
         on(&AutoPerspective::onPerspective);
-        addKeywords({"perspective", "vue", "caméra"});
+        addKeywords({"perspective", "view", "camera"});
     }
 
 private:
     static Perspective parse(const std::string& value, Perspective fallback) {
-        if (value == "1re personne") return Perspective::FirstPerson;
-        if (value == "3e personne") return Perspective::ThirdPersonBack;
-        if (value == "3e personne avant") return Perspective::ThirdPersonFront;
+        if (value == "First person") return Perspective::FirstPerson;
+        if (value == "Third person") return Perspective::ThirdPersonBack;
+        if (value == "Third person front") return Perspective::ThirdPersonFront;
         return fallback;
     }
 
@@ -364,10 +364,10 @@ private:
 
         if (player.inWater) {
             event.perspective =
-                parse(settings.value<std::string>("onSwim", "Aucune"), event.perspective);
+                parse(settings.value<std::string>("onSwim", "None"), event.perspective);
         } else if (player.flying) {
             event.perspective =
-                parse(settings.value<std::string>("onElytra", "3e personne"), event.perspective);
+                parse(settings.value<std::string>("onElytra", "Third person"), event.perspective);
         }
     }
 };
@@ -376,14 +376,14 @@ class NullMovement final : public Module {
 public:
     NullMovement()
         : Module("null_movement", "Null Movement", ModuleCategory::Movement,
-                 "Donne la priorité à la dernière touche de direction pressée.") {
-        settings.toggle("horizontal", "Axes gauche/droite", true);
-        settings.toggle("vertical", "Axes avant/arrière", true);
+                 "Gives priority to the last direction key pressed.") {
+        settings.toggle("horizontal", "Left/right axes", true);
+        settings.toggle("vertical", "Forward/back axes", true);
 
         mutablePermissions().inputSynthesis = true;
 
         on(&NullMovement::onKey, EventPriority::High);
-        addKeywords({"null movement", "déplacement", "priorité", "touches"});
+        addKeywords({"null movement", "movement", "priority", "keys"});
     }
 
 private:

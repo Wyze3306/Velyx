@@ -4,9 +4,11 @@
 #include <dwrite_3.h>
 #include <dwmapi.h>
 #include <shellapi.h>
+#include <wincodec.h>
 
 #include <algorithm>
 #include <atomic>
+#include <fstream>
 #include <chrono>
 #include <functional>
 #include <mutex>
@@ -14,9 +16,12 @@
 #include <thread>
 #include <vector>
 
+#include <json/json.hpp>
+
 #include <velyx/Version.hpp>
 
 #include "core/Color.hpp"
+#include "core/Lang.hpp"
 #include "core/Log.hpp"
 #include "core/Math.hpp"
 #include "core/Paths.hpp"
@@ -53,6 +58,7 @@ IDWriteFactory5* g_dwrite5 = nullptr;
 IDWriteFontCollection1* g_bundledFonts = nullptr;
 ID2D1HwndRenderTarget* g_target = nullptr;
 ID2D1SolidColorBrush* g_brush = nullptr;
+ID2D1Bitmap* g_icon = nullptr;
 IDWriteTextFormat* g_fontTitle = nullptr;
 IDWriteTextFormat* g_fontBody = nullptr;
 IDWriteTextFormat* g_fontSmall = nullptr;
@@ -73,7 +79,7 @@ int g_menu = -1;
 int g_rowMenu = -1;
 float g_scroll = 0.f;
 
-std::string g_status = "Prêt.";
+std::string g_status = "Ready.";
 bool g_statusIsError = false;
 
 std::string g_newInstanceName;
@@ -207,13 +213,13 @@ void write(std::wstring_view text, const Rect& rect, const Color& color, IDWrite
 }
 
 void write(std::string_view text, const Rect& rect, const Color& color, IDWriteTextFormat* format) {
-    write(strings::toUtf16(text), rect, color, format);
+    write(strings::toUtf16(tr(text)), rect, color, format);
 }
 
 float measureText(std::string_view text, IDWriteTextFormat* format) {
     if (!g_dwriteFactory || !format || text.empty()) return 0.f;
 
-    const std::wstring wide = strings::toUtf16(text);
+    const std::wstring wide = strings::toUtf16(tr(text));
     IDWriteTextLayout* layout = nullptr;
     if (FAILED(g_dwriteFactory->CreateTextLayout(wide.c_str(), static_cast<UINT32>(wide.size()),
                                                  format, 2000.f, 60.f, &layout))) {
@@ -225,6 +231,100 @@ float measureText(std::string_view text, IDWriteTextFormat* format) {
     layout->Release();
 
     return metrics.widthIncludingTrailingWhitespace;
+}
+
+// The payload lands in %APPDATA%\Velyx on first run; a build started from the build
+// tree reads the same files from beside the executable instead.
+std::filesystem::path assetPath(std::string_view relative) {
+    const auto unpacked = Paths::assets() / relative;
+
+    std::error_code ec;
+    if (std::filesystem::exists(unpacked, ec)) return unpacked;
+
+    wchar_t buffer[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+    return std::filesystem::path(buffer).parent_path() / "assets" / relative;
+}
+
+// The launcher has no configuration of its own; it follows the language the client
+// was last set to, so the two halves never disagree.
+std::string configuredLanguage() {
+    std::ifstream stream(Paths::config() / "client.json");
+    if (!stream) return "en";
+
+    try {
+        nlohmann::json json;
+        stream >> json;
+        return json.value("language", std::string("en"));
+    } catch (const std::exception&) {
+        return "en";
+    }
+}
+
+void loadIcon() {
+    if (!g_target) return;
+
+    IWICImagingFactory* wic = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&wic)))) {
+        return;
+    }
+
+    const auto path = assetPath("icon.png");
+
+    IWICBitmapDecoder* decoder = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICFormatConverter* converter = nullptr;
+
+    if (SUCCEEDED(wic->CreateDecoderFromFilename(path.wstring().c_str(), nullptr, GENERIC_READ,
+                                                 WICDecodeMetadataCacheOnLoad, &decoder)) &&
+        SUCCEEDED(decoder->GetFrame(0, &frame)) &&
+        SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
+        SUCCEEDED(converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA,
+                                        WICBitmapDitherTypeNone, nullptr, 0.,
+                                        WICBitmapPaletteTypeMedianCut))) {
+        g_target->CreateBitmapFromWicBitmap(converter, nullptr, &g_icon);
+    }
+
+    if (!g_icon) Log::warn(kLog, "no mark at {}", path.string());
+
+    if (converter) converter->Release();
+    if (frame) frame->Release();
+    if (decoder) decoder->Release();
+    wic->Release();
+}
+
+// The mark, with the chevron the launcher used to draw as the fallback.
+void drawMark(const Rect& rect) {
+    if (!g_icon) {
+        const Vec2 centre = rect.center();
+        const float arm = rect.width() * 0.27f;
+
+        g_brush->SetColor(toD2D(kAccent));
+        g_target->DrawLine(D2D1::Point2F(centre.x - arm, centre.y - arm),
+                           D2D1::Point2F(centre.x, centre.y + arm), g_brush, 2.4f);
+        g_target->DrawLine(D2D1::Point2F(centre.x, centre.y + arm),
+                           D2D1::Point2F(centre.x + arm, centre.y - arm), g_brush, 2.4f);
+        return;
+    }
+
+    // The mark is a square tile; the rounding is what makes it sit with the rest of
+    // the interface. Without a layer it is still drawn, just with square corners.
+    const float radius = std::min(rect.width(), rect.height()) * 0.26f;
+
+    ID2D1RoundedRectangleGeometry* clip = nullptr;
+    ID2D1Layer* layer = nullptr;
+
+    const bool rounded = SUCCEEDED(g_d2dFactory->CreateRoundedRectangleGeometry(
+                             D2D1::RoundedRect(toD2D(rect), radius, radius), &clip)) &&
+                         SUCCEEDED(g_target->CreateLayer(nullptr, &layer));
+
+    if (rounded) g_target->PushLayer(D2D1::LayerParameters(toD2D(rect), clip), layer);
+    g_target->DrawBitmap(g_icon, toD2D(rect));
+    if (rounded) g_target->PopLayer();
+
+    if (layer) layer->Release();
+    if (clip) clip->Release();
 }
 
 void drawChevron(Vec2 centre, const Color& color) {
@@ -282,8 +382,8 @@ bool button(const Rect& rect, std::string_view label, bool primary = false, bool
 void createInstance() {
     const std::string name = g_newInstanceName.empty() ? "Instance" : g_newInstanceName;
 
-    startJob("Création de « " + name + " »", [name] {
-        setPhase("Copie des fichiers du jeu", "recherche de l'installation");
+    startJob("Creating « " + name + " »", [name] {
+        setPhase("Copying the game files", "looking for the installation");
 
         std::string error;
         const bool ok = InstanceManager::get().create(
@@ -294,7 +394,7 @@ void createInstance() {
             &error);
 
         if (ok) {
-            finishJob("Instance « " + name + " » prête.", false);
+            finishJob("Instance « " + name + " » ready.", false);
         } else {
             finishJob(error, true);
         }
@@ -305,19 +405,19 @@ void createInstance() {
 }
 
 void launchInstance(const std::string& id, const std::string& name) {
-    startJob("Lancement de « " + name + " »", [id, name] {
-        setPhase("Démarrage du jeu", "activation du paquet");
+    startJob("Launching « " + name + " »", [id, name] {
+        setPhase("Starting the game", "activating the package");
 
         auto& manager = InstanceManager::get();
         Instance* instance = manager.find(id);
         if (!instance) {
-            finishJob("Instance introuvable.", true);
+            finishJob("Instance not found.", true);
             return;
         }
 
         std::string error;
         if (manager.launch(*instance, &error)) {
-            finishJob("« " + name + " » lancée (pid " + std::to_string(instance->pid) + ").", false);
+            finishJob("« " + name + " » launched (pid " + std::to_string(instance->pid) + ").", false);
         } else {
             finishJob(error, true);
         }
@@ -330,13 +430,13 @@ void launchInstance(const std::string& id, const std::string& name) {
 
 void switchVersion(const std::string& id, const std::string& name,
                    const InstanceManager::VersionSource& source) {
-    startJob("Passage de « " + name + " » en " + source.version, [id, name, source] {
-        setPhase("Réinstallation du jeu", source.version);
+    startJob("Moving « " + name + " » to " + source.version, [id, name, source] {
+        setPhase("Reinstalling the game", source.version);
 
         auto& manager = InstanceManager::get();
         Instance* instance = manager.find(id);
         if (!instance) {
-            finishJob("Instance introuvable.", true);
+            finishJob("Instance not found.", true);
             return;
         }
 
@@ -346,7 +446,7 @@ void switchVersion(const std::string& id, const std::string& name,
                                    setProgress(done, total, label);
                                },
                                &error)) {
-            finishJob("« " + name + " » est maintenant en " + source.version + ".", false);
+            finishJob("« " + name + " » now runs " + source.version + ".", false);
         } else {
             finishJob(error, true);
         }
@@ -356,18 +456,18 @@ void switchVersion(const std::string& id, const std::string& name,
 void removeInstance(const std::string& id, const std::string& name) {
     const int answer = MessageBoxW(
         g_window,
-        strings::toUtf16("Supprimer l'instance « " + name +
-                         " » et ses fichiers ?\nLes mondes de cette instance seront perdus.")
+        strings::toUtf16("Delete the instance « " + name +
+                         " » and its files?\nThe worlds in this instance will be lost.")
             .c_str(),
         L"Velyx", MB_YESNO | MB_ICONWARNING);
     if (answer != IDYES) return;
 
-    startJob("Suppression de « " + name + " »", [id, name] {
-        setPhase("Désinscription du paquet", name);
+    startJob("Deleting « " + name + " »", [id, name] {
+        setPhase("Unregistering the package", name);
 
         std::string error;
         if (InstanceManager::get().remove(id, true, &error)) {
-            finishJob("Instance supprimée.", false);
+            finishJob("Instance deleted.", false);
         } else {
             finishJob(error, true);
         }
@@ -377,8 +477,8 @@ void removeInstance(const std::string& id, const std::string& name) {
 }
 
 void loadVersions() {
-    startJob("Lecture des versions disponibles", [] {
-        setPhase("Recherche des versions", "paquet installé et dossier versions/");
+    startJob("Reading the available versions", [] {
+        setPhase("Looking for versions", "the installed package and the versions/ folder");
         const auto sources = InstanceManager::availableVersions();
         {
             const std::lock_guard lock(g_job.mutex);
@@ -391,11 +491,11 @@ void loadVersions() {
 void bindAccount(const std::string& id, const std::string& name) {
     auto& accounts = AccountStore::get();
 
-    Account& account = accounts.create("Compte " + std::to_string(accounts.all().size() + 1));
+    Account& account = accounts.create("Account " + std::to_string(accounts.all().size() + 1));
     accounts.bind(account.id, id);
 
-    setStatus("« " + account.label + " » est associé à « " + name +
-              " ». Connectez-vous dans le jeu au premier lancement.");
+    setStatus("« " + account.label + " » is linked to « " + name +
+              " ». Sign in from the game on first launch.");
 }
 
 void drawInstanceRow(const Rect& rect, const Instance& instance, int index) {
@@ -428,7 +528,7 @@ void drawInstanceRow(const Rect& rect, const Instance& instance, int index) {
           kText, g_fontTitle);
 
     const Account* account = AccountStore::get().forInstance(instance.id);
-    write(account ? account->label : "Aucun compte associé",
+    write(account ? account->label : "No account linked",
           Rect{rect.left + 68.f, rect.top + 38.f, rect.left + 300.f, rect.bottom - 14.f}, kTextDim,
           g_fontSmall);
 
@@ -456,13 +556,13 @@ void drawInstanceRow(const Rect& rect, const Instance& instance, int index) {
         }
     }
 
-    std::string state = "Prête";
+    std::string state = "Ready";
     Color stateColor = kTextMuted;
     if (running) {
-        state = "En cours";
+        state = "Running";
         stateColor = kAccent;
     } else if (!instance.registered) {
-        state = "Non enregistrée";
+        state = "Not registered";
         stateColor = palette::kHoney;
     }
 
@@ -480,14 +580,14 @@ void drawInstanceRow(const Rect& rect, const Instance& instance, int index) {
         stroke(action, kBorder, 9.f);
         fill(Rect::fromSize(action.left + 16.f, action.center().y - 5.f, 10.f, 10.f),
              stopHover ? kText : kTextMuted, 2.f);
-        write("Arrêter", Rect{action.left + 34.f, action.top, action.right - 10.f, action.bottom},
+        write("Stop", Rect{action.left + 34.f, action.top, action.right - 10.f, action.bottom},
               stopHover ? kText : kTextMuted, g_fontSmall);
 
         if (stopHover) {
             g_hotWidget = ++g_nextWidget;
             if (g_clicked) {
                 Process::terminate(instance.pid);
-                setStatus("« " + instance.name + " » arrêtée.");
+                setStatus("« " + instance.name + " » stopped.");
                 refreshSnapshot();
             }
         }
@@ -499,7 +599,7 @@ void drawInstanceRow(const Rect& rect, const Instance& instance, int index) {
         fill(action, busy() ? background.fade(0.35f) : background, 9.f);
         drawPlayGlyph({action.left + 22.f, action.center().y},
                       busy() ? foreground.fade(0.4f) : foreground);
-        write("Jouer", Rect{action.left + 36.f, action.top, action.right - 12.f, action.bottom},
+        write("Play", Rect{action.left + 36.f, action.top, action.right - 12.f, action.bottom},
               busy() ? foreground.fade(0.4f) : foreground, g_fontBody);
 
         if (playHover) {
@@ -543,7 +643,7 @@ void drawRowMenu(const Rect& rowRect, int index) {
     fill(menu, Color::rgb8(23, 25, 29), 12.f);
     stroke(menu, Color::rgb8(46, 52, 59), 12.f);
 
-    static const char* kLabels[3] = {"Associer un compte", "Ouvrir le dossier", "Supprimer"};
+    static const char* kLabels[3] = {"Link an account", "Open the folder", "Delete"};
 
     float y = menu.top + 6.f;
     for (int i = 0; i < 3; ++i) {
@@ -588,14 +688,14 @@ void drawVersionMenu(const Rect& rowRect, int index) {
     fill(menu, Color::rgb8(23, 25, 29), 12.f);
     stroke(menu, Color::rgb8(46, 52, 59), 12.f);
 
-    write("VERSIONS DISPONIBLES",
+    write("AVAILABLE VERSIONS",
           Rect{menu.left + 12.f, menu.top + 6.f, menu.right - 12.f, menu.top + 28.f}, kTextDim,
           g_fontSmall);
 
     float y = menu.top + 30.f;
 
     if (g_versions.empty()) {
-        write("Aucune version détectée",
+        write("No version detected",
               Rect{menu.left + 12.f, y, menu.right - 12.f, y + 30.f}, kTextMuted, g_fontSmall);
         y += 30.f;
     }
@@ -618,7 +718,7 @@ void drawVersionMenu(const Rect& rowRect, int index) {
         if (current) {
             fill(Rect::fromSize(item.right - 22.f, item.center().y - 3.f, 6.f, 6.f), kAccent, 3.f);
         } else if (source.installed) {
-            write("installée", Rect{item.right - 88.f, item.top, item.right - 14.f, item.bottom},
+            write("installed", Rect{item.right - 88.f, item.top, item.right - 14.f, item.bottom},
                   kTextDim, g_fontSmall);
         }
 
@@ -635,7 +735,7 @@ void drawVersionMenu(const Rect& rowRect, int index) {
         fill(add, kSurfaceHover, 8.f);
         g_hotWidget = ++g_nextWidget;
     }
-    write("Ajouter un dossier de version",
+    write("Add a version folder",
           Rect{add.left + 12.f, add.top, add.right - 10.f, add.bottom}, kTextDim, g_fontSmall);
 
     if (addHover && g_clicked) {
@@ -643,7 +743,7 @@ void drawVersionMenu(const Rect& rowRect, int index) {
         std::filesystem::create_directories(Paths::versions(), ec);
         ShellExecuteW(nullptr, L"open", Paths::versions().wstring().c_str(), nullptr, nullptr,
                       SW_SHOWNORMAL);
-        setStatus("Déposez un build décompressé dans versions/, puis rouvrez ce menu.");
+        setStatus("Drop an unpacked build into versions/, then reopen this menu.");
         g_menu = -1;
     }
 }
@@ -657,23 +757,16 @@ void drawEmptyState(const Rect& rect) {
     const Vec2 centre{rect.center().x, top + 26.f};
 
     const Rect badge = Rect::fromSize(centre.x - 26.f, top, 52.f, 52.f);
-    fill(badge, kAccent.withAlpha(0.10f), 15.f);
-    stroke(badge, kAccent.withAlpha(0.22f), 15.f);
+    drawMark(badge);
 
-    g_brush->SetColor(toD2D(kAccent));
-    g_target->DrawLine(D2D1::Point2F(centre.x - 9.f, centre.y - 8.f),
-                       D2D1::Point2F(centre.x, centre.y + 9.f), g_brush, 2.6f);
-    g_target->DrawLine(D2D1::Point2F(centre.x, centre.y + 9.f),
-                       D2D1::Point2F(centre.x + 9.f, centre.y - 8.f), g_brush, 2.6f);
-
-    write("Aucune instance pour l'instant",
+    write("No instances yet",
           Rect{rect.left, top + 66.f, rect.right, top + 92.f}, kText, g_fontCentre);
 
-    write("Velyx copie le jeu installé par liens durs et lui donne",
+    write("Velyx hard links the installed game and gives each copy",
           Rect{rect.left, top + 96.f, rect.right, top + 118.f}, kTextDim, g_fontCentreLight);
-    write("une identité de paquet distincte. Windows accepte alors",
+    write("its own package identity, which is what lets Windows",
           Rect{rect.left, top + 116.f, rect.right, top + 138.f}, kTextDim, g_fontCentreLight);
-    write("de lancer plusieurs copies en même temps.",
+    write("to run several copies at once.",
           Rect{rect.left, top + 136.f, rect.right, top + 158.f}, kTextDim, g_fontCentreLight);
 }
 
@@ -721,7 +814,7 @@ void drawBusyOverlay(const Rect& client) {
     }
 
     const std::string line =
-        total > 0 ? std::to_string(done) + " / " + std::to_string(total) + " fichiers" : detail;
+        total > 0 ? std::to_string(done) + " / " + std::to_string(total) + " files" : detail;
     write(line, Rect{card.left + 24.f, card.bottom - 34.f, card.right - 24.f, card.bottom - 14.f},
           kTextDim, g_fontSmall);
 }
@@ -733,16 +826,12 @@ void render(const Rect& client) {
     fill(client, kBackground);
 
     const Rect brand{client.left + 24.f, client.top + 16.f, client.left + 300.f, client.top + 40.f};
-    const Vec2 mark{brand.left + 8.f, brand.center().y};
-    g_brush->SetColor(toD2D(kAccent));
-    g_target->DrawLine(D2D1::Point2F(mark.x - 7.f, mark.y - 7.f),
-                       D2D1::Point2F(mark.x, mark.y + 7.f), g_brush, 2.4f);
-    g_target->DrawLine(D2D1::Point2F(mark.x, mark.y + 7.f),
-                       D2D1::Point2F(mark.x + 7.f, mark.y - 7.f), g_brush, 2.4f);
 
-    write("VELYX", Rect{brand.left + 24.f, brand.top, brand.left + 100.f, brand.bottom}, kTextMuted,
+    drawMark(Rect{brand.left, brand.center().y - 11.f, brand.left + 22.f, brand.center().y + 11.f});
+
+    write("VELYX", Rect{brand.left + 32.f, brand.top, brand.left + 108.f, brand.bottom}, kTextMuted,
           g_fontSmall);
-    write(version::kString, Rect{brand.left + 74.f, brand.top, brand.left + 140.f, brand.bottom},
+    write(version::kString, Rect{brand.left + 82.f, brand.top, brand.left + 148.f, brand.bottom},
           kTextDim, g_fontSmall);
 
     const Rect header{client.left + 24.f, client.top + 46.f, client.right - 24.f, client.top + 94.f};
@@ -753,7 +842,7 @@ void render(const Rect& client) {
     const int live = static_cast<int>(
         std::ranges::count_if(g_instances, [](const Instance& i) { return i.running(); }));
     write(std::to_string(g_instances.size()) + " instances · " + std::to_string(live) +
-              " en cours · " + std::to_string(AccountStore::get().all().size()) + " comptes",
+              " running · " + std::to_string(AccountStore::get().all().size()) + " accounts",
           Rect{header.left, header.top + 28.f, header.left + 340.f, header.bottom}, kTextDim,
           g_fontSmall);
 
@@ -761,7 +850,7 @@ void render(const Rect& client) {
                          header.center().y + 17.f};
     fill(nameField, kSurface, 9.f);
     stroke(nameField, g_editingName ? kAccent.withAlpha(0.6f) : kBorder, 9.f);
-    write(g_newInstanceName.empty() ? "Nom de la nouvelle instance" : g_newInstanceName,
+    write(g_newInstanceName.empty() ? "Name of the new instance" : g_newInstanceName,
           Rect{nameField.left + 12.f, nameField.top, nameField.right - 12.f, nameField.bottom},
           g_newInstanceName.empty() ? kTextDim : kText, g_fontBody);
 
@@ -774,7 +863,7 @@ void render(const Rect& client) {
 
     if (button(Rect{header.right - 164.f, header.center().y - 17.f, header.right,
                     header.center().y + 17.f},
-               "Créer une instance", true, !busy())) {
+               "Create an instance", true, !busy())) {
         createInstance();
     }
 
@@ -791,11 +880,11 @@ void render(const Rect& client) {
         stroke(banner, kDanger.withAlpha(0.22f), 12.f);
         fill(Rect{banner.left + 1.f, banner.top + 12.f, banner.left + 3.f, banner.bottom - 12.f},
              kDanger, 1.f);
-        write("Le mode développeur de Windows est désactivé",
+        write("Windows developer mode is off",
               Rect{banner.left + 18.f, banner.top + 10.f, banner.right - 16.f, banner.top + 30.f},
               kDanger, g_fontBody);
-        write("Paramètres > Confidentialité et sécurité > Espace développeurs. Sans lui, Windows "
-              "refuse d'enregistrer une instance.",
+        write("Settings > Privacy & security > For developers. Without it, Windows "
+              "refuses to register an instance.",
               Rect{banner.left + 18.f, banner.top + 30.f, banner.right - 16.f, banner.bottom - 8.f},
               kTextMuted, g_fontSmall);
     }
@@ -829,16 +918,7 @@ void render(const Rect& client) {
     drawBusyOverlay(client);
 }
 
-std::filesystem::path fontDirectory() {
-    const auto unpacked = Paths::assets() / "fonts";
-
-    std::error_code ec;
-    if (std::filesystem::exists(unpacked, ec)) return unpacked;
-
-    wchar_t buffer[MAX_PATH]{};
-    GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    return std::filesystem::path(buffer).parent_path() / "assets" / "fonts";
-}
+std::filesystem::path fontDirectory() { return assetPath("fonts"); }
 
 void loadBundledFonts() {
     if (!g_dwriteFactory) return;
@@ -920,6 +1000,7 @@ bool createGraphics(HWND window) {
     g_target->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &g_brush);
 
     loadBundledFonts();
+    loadIcon();
 
     g_fontHeading = makeFormat(21.f, DWRITE_FONT_WEIGHT_BOLD);
     g_fontTitle = makeFormat(14.5f, DWRITE_FONT_WEIGHT_MEDIUM);
@@ -951,6 +1032,7 @@ void destroyGraphics() {
     release(g_fontBody);
     release(g_fontTitle);
     release(g_fontHeading);
+    release(g_icon);
     release(g_brush);
     release(g_target);
     release(g_bundledFonts);
@@ -1058,6 +1140,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Log::info(kLog, "Velyx Launcher {}", version::kFull);
 
     resources::unpack(GetModuleHandleW(nullptr), Paths::root());
+    lang::load(configuredLanguage(), assetPath("lang"));
 
     InstanceManager::get().load();
     AccountStore::get().load();
@@ -1070,6 +1153,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
     windowClass.lpfnWndProc = windowProc;
     windowClass.hInstance = instance;
+    windowClass.hIcon = static_cast<HICON>(
+        LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE));
+    windowClass.hIconSm = static_cast<HICON>(LoadImageW(
+        instance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON), 0));
     windowClass.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
     windowClass.hbrBackground = CreateSolidBrush(RGB(14, 15, 17));
     windowClass.lpszClassName = L"VelyxLauncher";
@@ -1080,7 +1168,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         kWindowWidth, kWindowHeight, nullptr, nullptr, instance, nullptr);
 
     if (!window || !createGraphics(window)) {
-        MessageBoxW(nullptr, L"Direct2D n'a pas pu être initialisé.", L"Velyx", MB_ICONERROR);
+        MessageBoxW(nullptr, L"Direct2D could not be initialised.", L"Velyx", MB_ICONERROR);
         return 1;
     }
 

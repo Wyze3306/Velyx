@@ -45,6 +45,11 @@ void ClientConfig::load() {
     activeProfile = json.value("activeProfile", activeProfile);
     language = json.value("language", language);
     updateChannel = json.value("updateChannel", updateChannel);
+    theme = json.value("theme", theme);
+
+    if (json.contains("interface") && json["interface"].is_object()) {
+        interfaceState = json["interface"];
+    }
     onboardingCompleted = json.value("onboardingCompleted", onboardingCompleted);
     telemetry = json.value("telemetry", telemetry);
     cleanShutdown = json.value("cleanShutdown", true);
@@ -55,7 +60,10 @@ void ClientConfig::load() {
     if (json.contains("keys")) {
         const auto& keys = json["keys"];
         guiKey = bindFromJson(keys.value("gui", nlohmann::json{}), guiKey);
-        paletteKey = bindFromJson(keys.value("palette", nlohmann::json{}), paletteKey);
+        // "palette" is what the command palette's key was called; the menu's search
+        // inherited both the key and the setting.
+        searchKey = bindFromJson(keys.value("palette", nlohmann::json{}), searchKey);
+        searchKey = bindFromJson(keys.value("search", nlohmann::json{}), searchKey);
         hudEditorKey = bindFromJson(keys.value("hudEditor", nlohmann::json{}), hudEditorKey);
         instantReplayKey = bindFromJson(keys.value("instantReplay", nlohmann::json{}),
                                         instantReplayKey);
@@ -69,6 +77,8 @@ void ClientConfig::save() const {
     json["activeProfile"] = activeProfile;
     json["language"] = language;
     json["updateChannel"] = updateChannel;
+    json["theme"] = theme;
+    json["interface"] = interfaceState;
     json["onboardingCompleted"] = onboardingCompleted;
     json["telemetry"] = telemetry;
     json["cleanShutdown"] = cleanShutdown;
@@ -78,7 +88,7 @@ void ClientConfig::save() const {
 
     auto& keys = json["keys"];
     keys["gui"] = bindToJson(guiKey);
-    keys["palette"] = bindToJson(paletteKey);
+    keys["search"] = bindToJson(searchKey);
     keys["hudEditor"] = bindToJson(hudEditorKey);
     keys["instantReplay"] = bindToJson(instantReplayKey);
     keys["screenshot"] = bindToJson(screenshotKey);

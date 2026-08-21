@@ -90,6 +90,14 @@ if (VELYX_BUILD_LAUNCHER)
     add_subdirectory(src/launcher)
 endif ()
 
+# The launcher unpacks these beside itself at runtime; a build that is injected
+# without it reads them from next to the binary instead, so they are staged here.
+add_custom_target(velyx_assets ALL
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+        "${CMAKE_SOURCE_DIR}/assets" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets"
+        COMMENT "Staging assets/ next to the binaries"
+        VERBATIM)
+
 message(STATUS "")
 message(STATUS "  Velyx ${PROJECT_VERSION} (${VELYX_CHANNEL} / ${VELYX_COMMIT})")
 message(STATUS "  compiler : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")

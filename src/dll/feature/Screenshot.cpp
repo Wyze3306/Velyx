@@ -53,11 +53,11 @@ Result capture(const std::filesystem::path& destination) {
     GraphicsContext& graphics = GraphicsContext::get();
 
     ID2D1DeviceContext* context = graphics.d2d();
-    if (!context || !graphics.ready()) return fail("le rendu n'est pas prêt");
+    if (!context || !graphics.ready()) return fail("the renderer is not ready");
 
     const auto width = static_cast<UINT32>(graphics.size().x);
     const auto height = static_cast<UINT32>(graphics.size().y);
-    if (width == 0 || height == 0) return fail("taille d'écran invalide");
+    if (width == 0 || height == 0) return fail("invalid screen size");
 
     const D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
@@ -66,18 +66,18 @@ Result capture(const std::filesystem::path& destination) {
     ComPtr<ID2D1Bitmap1> staging;
     if (FAILED(context->CreateBitmap(D2D1::SizeU(width, height), nullptr, 0, properties,
                                      staging.put()))) {
-        return fail("impossible d'allouer le tampon de capture");
+        return fail("the capture buffer could not be allocated");
     }
 
     const D2D1_POINT_2U origin{0, 0};
     const D2D1_RECT_U source{0, 0, width, height};
     if (FAILED(staging->CopyFromRenderTarget(&origin, context, &source))) {
-        return fail("copie du back buffer impossible");
+        return fail("the back buffer could not be copied");
     }
 
     D2D1_MAPPED_RECT mapped{};
     if (FAILED(staging->Map(D2D1_MAP_OPTIONS_READ, &mapped))) {
-        return fail("lecture du tampon impossible");
+        return fail("the buffer could not be read");
     }
 
     std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
@@ -97,37 +97,37 @@ Result capture(const std::filesystem::path& destination) {
     if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                                 __uuidof(IWICImagingFactory),
                                 reinterpret_cast<void**>(wic.put())))) {
-        return fail("WIC indisponible");
+        return fail("WIC unavailable");
     }
 
     ComPtr<IWICStream> stream;
     if (FAILED(wic->CreateStream(stream.put())) ||
         FAILED(stream->InitializeFromFilename(destination.wstring().c_str(), GENERIC_WRITE))) {
-        return fail("écriture impossible dans " + destination.string());
+        return fail("could not write to " + destination.string());
     }
 
     ComPtr<IWICBitmapEncoder> encoder;
     if (FAILED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, encoder.put())) ||
         FAILED(encoder->Initialize(stream.get(), WICBitmapEncoderNoCache))) {
-        return fail("encodeur PNG indisponible");
+        return fail("PNG encoder unavailable");
     }
 
     ComPtr<IWICBitmapFrameEncode> frame;
     ComPtr<IPropertyBag2> options;
     if (FAILED(encoder->CreateNewFrame(frame.put(), options.put())) ||
         FAILED(frame->Initialize(options.get()))) {
-        return fail("initialisation de l'image impossible");
+        return fail("the image could not be initialised");
     }
 
     WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
     if (FAILED(frame->SetSize(width, height)) || FAILED(frame->SetPixelFormat(&format))) {
-        return fail("format de sortie refusé");
+        return fail("output format refused");
     }
 
     if (FAILED(frame->WritePixels(height, width * 4, static_cast<UINT>(pixels.size()),
                                   pixels.data())) ||
         FAILED(frame->Commit()) || FAILED(encoder->Commit())) {
-        return fail("encodage PNG interrompu");
+        return fail("PNG encoding interrupted");
     }
 
     Log::info(kLog, "screenshot saved to {}", destination.string());

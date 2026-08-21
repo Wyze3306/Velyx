@@ -10,9 +10,9 @@ namespace velyx {
 namespace {
 
 constexpr std::array<const char*, 9> kAnchorLabels{
-    "Haut gauche", "Haut centre", "Haut droite",
-    "Milieu gauche", "Centre", "Milieu droite",
-    "Bas gauche", "Bas centre", "Bas droite",
+    "Top left", "Top centre", "Top right",
+    "Middle left", "Centre", "Middle right",
+    "Bottom left", "Bottom centre", "Bottom right",
 };
 
 Vec2 anchorFraction(HudAnchor anchor) {
@@ -54,38 +54,38 @@ HudModule::HudModule(std::string id, std::string name, std::string description,
 void HudModule::addLayoutSettings(Vec2 defaultPosition, HudAnchor defaultAnchor) {
     settings.header("Position");
     settings.position("position", "Position", defaultPosition,
-                      "Déplaçable directement dans l'éditeur de HUD.");
+                      "Movable straight from the HUD editor.");
 
     std::vector<std::string> anchors(kAnchorLabels.begin(), kAnchorLabels.end());
-    settings.dropdown("anchor", "Ancrage", anchorLabel(defaultAnchor), std::move(anchors),
-                      "Le coin d'écran auquel l'élément reste accroché.");
+    settings.dropdown("anchor", "Anchor", anchorLabel(defaultAnchor), std::move(anchors),
+                      "The screen corner the element stays anchored to.");
 
-    settings.slider("scale", "Échelle", 1.f, 0.4f, 3.f, "", "x");
+    settings.slider("scale", "Scale", 1.f, 0.4f, 3.f, "", "x");
     settings.slider("rotation", "Rotation", 0.f, -180.f, 180.f, "", "°").advanced = true;
-    settings.slider("opacity", "Opacité", 1.f, 0.f, 1.f);
+    settings.slider("opacity", "Opacity", 1.f, 0.f, 1.f);
 
-    settings.header("Apparence");
-    settings.toggle("background", "Fond", true);
-    settings.color("backgroundColor", "Couleur du fond", Color::rgb8(11, 31, 23, 160));
-    settings.slider("radius", "Arrondi", 8.f, 0.f, 24.f, "", "px");
-    settings.slider("padding", "Marge intérieure", 6.f, 0.f, 24.f, "", "px");
-    settings.toggle("border", "Bordure", false);
-    settings.color("borderColor", "Couleur de la bordure", palette::kMint.withAlpha(0.6f));
-    settings.toggle("shadow", "Ombre portée", true);
+    settings.header("Appearance");
+    settings.toggle("background", "Background", true);
+    settings.color("backgroundColor", "Background colour", Color::rgb8(11, 31, 23, 160));
+    settings.slider("radius", "Corner radius", 8.f, 0.f, 24.f, "", "px");
+    settings.slider("padding", "Padding", 6.f, 0.f, 24.f, "", "px");
+    settings.toggle("border", "Border", false);
+    settings.color("borderColor", "Border colour", palette::kMint.withAlpha(0.6f));
+    settings.toggle("shadow", "Drop shadow", true);
 
-    settings.header("Texte");
-    settings.toggle("useThemeColor", "Utiliser la couleur du thème", true);
-    settings.color("textColor", "Couleur du texte", palette::kSnow);
-    settings.slider("fontSize", "Taille du texte", 15.f, 8.f, 40.f, "", "px");
-    settings.text("fontFamily", "Police", "",
-                  "Vide = police du thème. Sinon, nom exact d'une police installée.")
+    settings.header("Text");
+    settings.toggle("useThemeColor", "Use the theme's colour", true);
+    settings.color("textColor", "Text colour", palette::kSnow);
+    settings.slider("fontSize", "Text size", 15.f, 8.f, 40.f, "", "px");
+    settings.text("fontFamily", "Font", "",
+                  "Empty uses the theme's font. Otherwise the exact name of an installed one.")
         .advanced = true;
-    settings.toggle("textShadow", "Ombre du texte", false);
+    settings.toggle("textShadow", "Text shadow", false);
 
-    settings.header("Organisation");
-    settings.text("group", "Groupe", "",
-                  "Les éléments d'un même groupe se déplacent ensemble dans l'éditeur.");
-    settings.toggle("hideInScreenshots", "Masquer en mode capture", false);
+    settings.header("Grouping");
+    settings.text("group", "Group", "",
+                  "Elements in the same group move together in the editor.");
+    settings.toggle("hideInScreenshots", "Hide in capture mode", false);
 
     if (Setting* backgroundColor = settings.find("backgroundColor")) {
         backgroundColor->visibleWhen = [this] { return settings.value<bool>("background", true); };
@@ -106,7 +106,7 @@ Vec2 HudModule::normalisedPosition() const {
 }
 
 HudAnchor HudModule::anchor() const {
-    return anchorFromLabel(settings.value<std::string>("anchor", "Haut gauche"));
+    return anchorFromLabel(settings.value<std::string>("anchor", "Top left"));
 }
 
 float HudModule::scale() const { return settings.value<float>("scale", 1.f); }

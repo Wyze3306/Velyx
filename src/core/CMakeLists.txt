@@ -1,4 +1,5 @@
 add_library(velyx_core STATIC
+        Lang.cpp
         Log.cpp
         Paths.cpp
         Strings.cpp

@@ -3,7 +3,15 @@ file(GLOB_RECURSE VELYX_DLL_SOURCES CONFIGURE_DEPENDS
 file(GLOB_RECURSE VELYX_DLL_HEADERS CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/*.hpp")
 
-add_library(Velyx SHARED ${VELYX_DLL_SOURCES} ${VELYX_DLL_HEADERS})
+set(VELYX_ICON_FILE "${CMAKE_SOURCE_DIR}/assets/velyx.ico")
+configure_file("${CMAKE_SOURCE_DIR}/cmake/icon.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/velyx_icon.rc" @ONLY)
+
+add_library(Velyx SHARED ${VELYX_DLL_SOURCES} ${VELYX_DLL_HEADERS}
+        "${CMAKE_CURRENT_BINARY_DIR}/velyx_icon.rc")
+
+set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/velyx_icon.rc" PROPERTIES
+        OBJECT_DEPENDS "${VELYX_ICON_FILE}")
 
 set_target_properties(Velyx PROPERTIES
         OUTPUT_NAME "Velyx"

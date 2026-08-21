@@ -22,24 +22,24 @@ const char* categoryName(ModuleCategory category) {
 
 const char* categoryLabel(ModuleCategory category) {
     switch (category) {
-        case ModuleCategory::Movement: return "Déplacement";
+        case ModuleCategory::Movement: return "Movement";
         case ModuleCategory::Hud:      return "HUD";
-        case ModuleCategory::Render:   return "Rendu";
-        case ModuleCategory::Utility:  return "Utilitaires";
-        case ModuleCategory::Misc:     return "Divers";
+        case ModuleCategory::Render:   return "Render";
+        case ModuleCategory::Utility:  return "Utility";
+        case ModuleCategory::Misc:     return "Misc";
         case ModuleCategory::Client:   return "Client";
         case ModuleCategory::Script:   return "Scripts";
     }
-    return "Divers";
+    return "Misc";
 }
 
 std::vector<std::string> ModulePermissions::describe() const {
     std::vector<std::string> list;
-    if (network) list.emplace_back("Réseau");
-    if (files) list.emplace_back("Fichiers");
-    if (inputSynthesis) list.emplace_back("Entrées simulées");
-    if (memoryPatch) list.emplace_back("Mémoire du jeu");
-    if (clipboard) list.emplace_back("Presse-papiers");
+    if (network) list.emplace_back("Network");
+    if (files) list.emplace_back("Files");
+    if (inputSynthesis) list.emplace_back("Synthetic input");
+    if (memoryPatch) list.emplace_back("Game memory");
+    if (clipboard) list.emplace_back("Clipboard");
     return list;
 }
 
@@ -88,7 +88,7 @@ void Module::setEnabled(bool enabled, bool byUser) {
 
 nlohmann::json Module::save() const {
     nlohmann::json json;
-    json["enabled"] = enabled_;
+    if (!interfaceModule_) json["enabled"] = enabled_;
     json["favourite"] = favourite_;
     json["keybind"] = toJson(SettingValue{keybind_});
     json["settings"] = settings.save();
@@ -109,7 +109,9 @@ void Module::load(const nlohmann::json& json) {
 
     if (json.contains("settings")) settings.load(json["settings"]);
 
-    if (json.contains("enabled") && json["enabled"].is_boolean()) {
+    // A profile written by an older build still carries the interfaces' own state.
+    // Applying it would close the menu the moment it is used to switch profile.
+    if (!interfaceModule_ && json.contains("enabled") && json["enabled"].is_boolean()) {
         setEnabled(json["enabled"].get<bool>(), false);
     }
 }

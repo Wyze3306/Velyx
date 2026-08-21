@@ -80,6 +80,11 @@ public:
     bool exportTo(const std::string& name, const std::filesystem::path& destination) const;
     bool importFrom(const std::filesystem::path& source, std::string* importedName = nullptr);
 
+    // The same one-line format profiles use, for the look of the interface: it is not
+    // tied to a profile, so it is shared on its own.
+    [[nodiscard]] std::string exportCode() const;
+    bool importCode(std::string_view code, std::string* importedName = nullptr);
+
     [[nodiscard]] std::vector<std::string> names() const;
     [[nodiscard]] const std::vector<Theme>& all() const { return themes_; }
     [[nodiscard]] static bool isBuiltIn(const std::string& name);

@@ -263,7 +263,7 @@ bool Game::showClientMessage(const std::string& message) {
 }
 
 const char* Game::compass(float yaw) {
-    static const char* kNames[] = {"S", "SO", "O", "NO", "N", "NE", "E", "SE"};
+    static const char* kNames[] = {"S", "SW", "W", "NW", "N", "NE", "E", "SE"};
 
     const float normalised = std::fmod(yaw + 180.f + 22.5f, 360.f);
     const int index = static_cast<int>((normalised < 0.f ? normalised + 360.f : normalised) / 45.f);
@@ -271,8 +271,8 @@ const char* Game::compass(float yaw) {
 }
 
 const char* Game::compassLong(float yaw) {
-    static const char* kNames[] = {"Sud",   "Sud-Ouest", "Ouest", "Nord-Ouest",
-                                   "Nord",  "Nord-Est",  "Est",   "Sud-Est"};
+    static const char* kNames[] = {"South", "South-west", "West", "North-west",
+                                   "North", "North-east", "East", "South-east"};
 
     const float normalised = std::fmod(yaw + 180.f + 22.5f, 360.f);
     const int index = static_cast<int>((normalised < 0.f ? normalised + 360.f : normalised) / 45.f);

@@ -4,6 +4,8 @@
 
 #include <string>
 
+#include <json/json.hpp>
+
 #include "dll/module/Setting.hpp"
 
 namespace velyx {
@@ -16,14 +18,22 @@ public:
     void save() const;
 
     std::string activeProfile = "Global";
-    std::string language = "fr";
+    std::string language = "en";
     std::string updateChannel = "stable";
+
+    // The look of the client is the client's, not a profile's: the theme and the
+    // interfaces' own settings stay the same whichever profile is active.
+    std::string theme = "Velyx";
+    nlohmann::json interfaceState = nlohmann::json::object();
 
     bool onboardingCompleted = false;
     bool telemetry = false;
 
     Keybind guiKey{VK_INSERT, false, false, false, Keybind::Mode::Toggle};
-    Keybind paletteKey{'K', true, false, false, Keybind::Mode::Toggle};
+
+    // The menu's second way in: it opens on the module list with the search field
+    // already focused.
+    Keybind searchKey{'K', true, false, false, Keybind::Mode::Toggle};
     Keybind hudEditorKey{VK_F6, false, false, false, Keybind::Mode::Toggle};
     Keybind instantReplayKey{VK_F9, false, false, false, Keybind::Mode::Once};
     Keybind screenshotKey{VK_F2, false, false, false, Keybind::Mode::Once};
