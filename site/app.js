@@ -389,17 +389,6 @@
       .catch(function () {});
   }
 
-  /* ── the hero arriving ───────────────────────────────────────── */
-
-  function stageHero() {
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    var parts = document.querySelectorAll('.hero-say > *, .hero-show');
-    for (var i = 0; i < parts.length; i++) {
-      parts[i].style.setProperty('--d', (i * 0.07).toFixed(2) + 's');
-      parts[i].classList.add('lift');
-    }
-  }
-
   /* ── go ──────────────────────────────────────────────────────── */
 
   var saved = null;
@@ -412,7 +401,6 @@
     applyLang(b.dataset.lang);
   });
 
-  stageHero();
   applyLang(start);
   askRelease();
 })();
