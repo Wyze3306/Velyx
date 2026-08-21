@@ -77,9 +77,20 @@ public:
 private:
     InstanceManager() = default;
 
-    static size_t cloneFiles(const std::filesystem::path& source,
-                             const std::filesystem::path& destination, CloneMode mode,
-                             const ProgressFn& onProgress);
+    // Copying out of C:\Program Files\WindowsApps is allowed to fail file by file, and a
+    // half-copied instance registers and activates just as happily as a whole one, so the
+    // clone has to say what it could not take rather than only how far it got.
+    struct CloneResult {
+        size_t copied = 0;
+        size_t failed = 0;
+        std::string firstError;
+
+        [[nodiscard]] std::string failure() const;
+    };
+
+    static CloneResult cloneFiles(const std::filesystem::path& source,
+                                  const std::filesystem::path& destination, CloneMode mode,
+                                  const ProgressFn& onProgress);
 
     static bool patchManifest(const std::filesystem::path& manifest, const std::string& packageName,
                               const std::string& displayName, std::string* error);

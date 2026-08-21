@@ -22,6 +22,9 @@ public:
     static bool isRunning(uint32_t pid);
     static bool terminate(uint32_t pid);
 
+    // Empty when the process is gone or keeps its image path to itself.
+    static std::string imageName(uint32_t pid);
+
     static uintptr_t moduleBase(uint32_t pid, std::string_view moduleName);
 
     static bool isModuleLoaded(uint32_t pid, std::string_view moduleName);

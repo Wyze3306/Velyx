@@ -137,13 +137,19 @@ std::optional<PackageIdentity> queryPackage(const std::string& packageName) {
 }
 
 // ActivateApplication is free to report no pid at all, and the id it does hand back
-// can belong to a starter process that is already gone by the time the game window
-// is up. Whichever it is, the instance is the Minecraft process that was not there
-// a moment ago.
-uint32_t waitForGame(const std::vector<uint32_t>& before, int timeoutMs) {
+// usually belongs to the GDK starter process, which is alive when the call returns and
+// gone a second or two later — long enough to pass a liveness check and be dead by the
+// time we inject. So the pid is only kept when it really is the game; otherwise the
+// instance is the Minecraft process that was not there a moment ago.
+uint32_t resolveGamePid(uint32_t activated, const std::vector<uint32_t>& before, int timeoutMs) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
 
     for (;;) {
+        if (activated != 0 && Process::isRunning(activated) &&
+            strings::toLower(Process::imageName(activated)) == strings::toLower(kGameExecutable)) {
+            return activated;
+        }
+
         for (const ProcessInfo& process : Process::findByName(kGameExecutable)) {
             if (std::ranges::find(before, process.pid) == before.end()) return process.pid;
         }
@@ -151,6 +157,34 @@ uint32_t waitForGame(const std::vector<uint32_t>& before, int timeoutMs) {
         if (std::chrono::steady_clock::now() >= deadline) return 0;
         Sleep(150);
     }
+}
+
+// A remote LoadLibraryW has nowhere to go until the loader inside the game has run, and
+// the pid can still turn out to be a starter that exits on us. The game's own module
+// appearing in the snapshot is the signal to go; an AppContainer is free to keep that
+// snapshot shut, so a process that simply stays alive long enough has to do instead.
+bool waitForGameReady(uint32_t pid, int timeoutMs) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+
+    for (;;) {
+        if (!Process::isRunning(pid)) return false;
+        if (Process::isModuleLoaded(pid, kGameExecutable)) break;
+        if (std::chrono::steady_clock::now() >= deadline) break;
+        Sleep(200);
+    }
+
+    Sleep(2000);
+    return Process::isRunning(pid);
+}
+
+// Windows recycles pids, so the number alone stops meaning anything the moment the process
+// it named exits: the answer is only trustworthy through a handle opened while it still ran.
+std::optional<DWORD> exitCodeOf(HANDLE process) {
+    DWORD code = 0;
+    if (!process || !GetExitCodeProcess(process, &code) || code == STILL_ACTIVE) {
+        return std::nullopt;
+    }
+    return code;
 }
 
 std::string activationHint(HRESULT hr) {
@@ -406,18 +440,38 @@ bool InstanceManager::patchManifest(const std::filesystem::path& manifest,
     return true;
 }
 
-size_t InstanceManager::cloneFiles(const std::filesystem::path& source,
-                                  const std::filesystem::path& destination, CloneMode mode,
-                                  const ProgressFn& onProgress) {
+std::string InstanceManager::CloneResult::failure() const {
+    std::string message = std::format("les fichiers du jeu n'ont pas pu être copiés "
+                                      "({} copiés, {} en échec)", copied, failed);
+    if (!firstError.empty()) message += ". Première erreur : " + firstError;
+    return message;
+}
+
+InstanceManager::CloneResult InstanceManager::cloneFiles(const std::filesystem::path& source,
+                                                         const std::filesystem::path& destination,
+                                                         CloneMode mode,
+                                                         const ProgressFn& onProgress) {
     std::error_code ec;
     std::filesystem::create_directories(destination, ec);
+
+    CloneResult result;
+
+    // Reading an installed package means reading C:\Program Files\WindowsApps, which Windows
+    // hands to TrustedInstaller and to app containers rather than to us. The iterator answers
+    // that with an empty walk, so ask it once, up front, where the answer is still legible.
+    std::error_code walkEc;
+    const std::filesystem::recursive_directory_iterator probe(source, walkEc);
+    if (walkEc) {
+        result.firstError = source.string() + " : " + walkEc.message();
+        result.failed = 1;
+        return result;
+    }
 
     size_t total = 0;
     for (const auto& entry : std::filesystem::recursive_directory_iterator(source, ec)) {
         if (entry.is_regular_file(ec)) ++total;
     }
 
-    size_t done = 0;
     for (const auto& entry : std::filesystem::recursive_directory_iterator(source, ec)) {
         const auto relative = std::filesystem::relative(entry.path(), source, ec);
         const auto target = destination / relative;
@@ -430,25 +484,35 @@ size_t InstanceManager::cloneFiles(const std::filesystem::path& source,
 
         std::filesystem::create_directories(target.parent_path(), ec);
 
+        std::error_code fileEc;
         if (mode == CloneMode::Link) {
-            std::filesystem::create_hard_link(entry.path(), target, ec);
-            if (ec) {
-                ec.clear();
+            std::filesystem::create_hard_link(entry.path(), target, fileEc);
+            if (fileEc) {
+                fileEc.clear();
                 std::filesystem::copy_file(entry.path(), target,
-                                           std::filesystem::copy_options::overwrite_existing, ec);
+                                           std::filesystem::copy_options::overwrite_existing,
+                                           fileEc);
             }
         } else {
             std::filesystem::copy_file(entry.path(), target,
-                                       std::filesystem::copy_options::overwrite_existing, ec);
+                                       std::filesystem::copy_options::overwrite_existing, fileEc);
         }
 
-        ++done;
-        if (onProgress && (done % 64 == 0 || done == total)) {
-            onProgress(done, total, relative.string());
+        if (fileEc) {
+            ++result.failed;
+            if (result.firstError.empty()) {
+                result.firstError = relative.string() + " : " + fileEc.message();
+            }
+            continue;
+        }
+
+        ++result.copied;
+        if (onProgress && (result.copied % 64 == 0 || result.copied == total)) {
+            onProgress(result.copied, total, relative.string());
         }
     }
 
-    return done;
+    return result;
 }
 
 std::vector<InstanceManager::VersionSource> InstanceManager::availableVersions() {
@@ -502,7 +566,11 @@ bool InstanceManager::setVersion(Instance& instance, const VersionSource& source
     // not here, so replacing the install root keeps them.
     std::filesystem::remove_all(instance.root, ec);
 
-    const size_t done = cloneFiles(source.root, instance.root, CloneMode::Link, onProgress);
+    const CloneResult clone = cloneFiles(source.root, instance.root, CloneMode::Link, onProgress);
+
+    if (clone.failed != 0 || !std::filesystem::exists(instance.root / kGameExecutable, ec)) {
+        return fail(clone.failure());
+    }
 
     const std::string packageName = "Velyx." + instance.id;
     if (!patchManifest(instance.root / "AppxManifest.xml", packageName,
@@ -517,7 +585,8 @@ bool InstanceManager::setVersion(Instance& instance, const VersionSource& source
     instance.gameVersion = source.version;
     save();
 
-    Log::info(kLog, "instance '{}' switched to {} ({} files)", instance.name, source.version, done);
+    Log::info(kLog, "instance '{}' switched to {} ({} files)", instance.name, source.version,
+              clone.copied);
     return true;
 }
 
@@ -558,7 +627,15 @@ bool InstanceManager::create(const std::string& name, CloneMode mode, const Prog
     }
     std::filesystem::create_directories(instance.root, ec);
 
-    const size_t done = cloneFiles(*source, instance.root, mode, onProgress);
+    const CloneResult clone = cloneFiles(*source, instance.root, mode, onProgress);
+
+    // Windows registers and activates a half-copied package without a word of complaint,
+    // and the game then dies before it is ever a process — which reads, much later, as a
+    // launch that went nowhere. The payload is checked here, where the cause is still known.
+    if (clone.failed != 0 || !std::filesystem::exists(instance.root / kGameExecutable, ec)) {
+        std::filesystem::remove_all(instance.root, ec);
+        return fail(clone.failure());
+    }
 
     // A distinct package identity is what lets Windows run several copies at once,
     // each with its own data container and therefore its own Xbox sign-in.
@@ -582,7 +659,7 @@ bool InstanceManager::create(const std::string& name, CloneMode mode, const Prog
     instances_.push_back(instance);
     save();
 
-    Log::info(kLog, "created instance '{}' ({} files)", name, done);
+    Log::info(kLog, "created instance '{}' ({} files)", name, clone.copied);
     return true;
 }
 
@@ -660,10 +737,30 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
 
     save();
 
+    // A registration only names a folder; it does not promise the folder still holds a game.
+    // Activating an empty one succeeds and starts nothing, which is indistinguishable from
+    // the game refusing to come up unless the payload is ruled out first.
+    std::error_code payloadEc;
+    if (!std::filesystem::exists(instance.root / kGameExecutable, payloadEc)) {
+        return fail(std::format("{} est introuvable dans {} : les fichiers du jeu n'ont pas "
+                                "été copiés. Recréez l'instance.",
+                                kGameExecutable, instance.root.string()));
+    }
+
+    // The sandbox runs as its own AppContainer identity, and only files that grant that
+    // identity read access exist as far as it is concerned. Re-granting costs nothing and
+    // covers whatever landed in the folder since the instance was made.
+    if (!Process::grantAppContainerAccess(instance.root)) {
+        Log::warn(kLog, "the AppContainer grant on {} did not go through",
+                  instance.root.string());
+    }
+
     std::vector<uint32_t> alreadyRunning;
     for (const ProcessInfo& process : Process::findByName(kGameExecutable)) {
         alreadyRunning.push_back(process.pid);
     }
+
+    Log::info(kLog, "activating {} from {}", instance.activationId(), instance.root.string());
 
     {
         const ComApartment apartment;
@@ -687,7 +784,10 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
 
         DWORD pid = 0;
         const std::wstring appId = strings::toUtf16(instance.activationId());
-        hr = manager->ActivateApplication(appId.c_str(), nullptr, AO_NOERRORUI, &pid);
+
+        // AO_NOERRORUI buys silence at the price of the only explanation there is: Windows
+        // knows why an app it accepted never started, and its dialog is where it says so.
+        hr = manager->ActivateApplication(appId.c_str(), nullptr, AO_NONE, &pid);
         manager->Release();
 
         if (FAILED(hr)) {
@@ -699,13 +799,38 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
         instance.pid = pid;
     }
 
-    if (instance.pid == 0 || !Process::isRunning(instance.pid)) {
-        instance.pid = waitForGame(alreadyRunning, 30000);
-    }
+    const uint32_t activatedPid = instance.pid;
+
+    // Held from here so the starter's exit code survives the process itself.
+    const HANDLE starter =
+        activatedPid == 0
+            ? nullptr
+            : OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, activatedPid);
+
+    instance.pid = resolveGamePid(activatedPid, alreadyRunning, 30000);
 
     if (instance.pid == 0) {
-        return fail("le jeu a été activé mais son processus reste introuvable");
+        std::string detail;
+        if (activatedPid == 0) {
+            detail = " Windows n'a rapporté aucun processus.";
+        } else if (const auto code = exitCodeOf(starter)) {
+            detail = std::format(" Le processus lancé par Windows (pid {}) s'est arrêté avec "
+                                 "le code 0x{:08X} sans ouvrir le jeu.",
+                                 activatedPid, static_cast<unsigned>(*code));
+        } else {
+            detail = std::format(" Le processus lancé par Windows (pid {}, {}) tourne encore "
+                                 "mais n'a jamais ouvert le jeu.",
+                                 activatedPid, Process::imageName(activatedPid));
+        }
+
+        if (starter) CloseHandle(starter);
+        return fail("le jeu a été activé mais son processus reste introuvable." + detail);
     }
+
+    if (starter) CloseHandle(starter);
+
+    Log::info(kLog, "activation reported pid {}, the game runs as {} (pid {})", activatedPid,
+              Process::imageName(instance.pid), instance.pid);
 
     instance.lastPlayedMs = nowMs();
     save();
@@ -714,8 +839,6 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
         Log::info(kLog, "launched instance '{}' (pid {}, without Velyx)", instance.name, instance.pid);
         return true;
     }
-
-    Sleep(2500);
 
     auto dll = Paths::root() / "bin" / "Velyx.dll";
 
@@ -726,15 +849,30 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
         dll = std::filesystem::path(modulePath).parent_path() / "Velyx.dll";
     }
 
-    std::string injectionError;
-    if (!Process::injectLibrary(instance.pid, dll, &injectionError)) {
+    // Bedrock reaches its window through more than one process, so a pid that dies on us
+    // was a step on the way there rather than the game: look the game up again and retry.
+    std::string injectionError = "le processus du jeu s'est arrêté avant l'injection";
 
-        if (error) *error = "Le jeu est lancé mais Velyx n'a pas pu être injecté : " + injectionError;
-        return false;
+    for (int attempt = 1; attempt <= 3; ++attempt) {
+        if (waitForGameReady(instance.pid, 30000) &&
+            Process::injectLibrary(instance.pid, dll, &injectionError)) {
+            Log::info(kLog, "launched instance '{}' with Velyx (pid {})", instance.name,
+                      instance.pid);
+            return true;
+        }
+
+        if (Process::isRunning(instance.pid)) break;
+
+        const uint32_t running = resolveGamePid(0, alreadyRunning, 15000);
+        if (running == 0 || running == instance.pid) break;
+
+        Log::warn(kLog, "pid {} was not the game, retrying with pid {}", instance.pid, running);
+        instance.pid = running;
+        save();
     }
 
-    Log::info(kLog, "launched instance '{}' with Velyx (pid {})", instance.name, instance.pid);
-    return true;
+    if (error) *error = "Le jeu est lancé mais Velyx n'a pas pu être injecté : " + injectionError;
+    return false;
 }
 
 bool InstanceManager::remove(const std::string& id, bool deleteFiles, std::string* error) {

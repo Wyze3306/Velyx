@@ -131,6 +131,19 @@ bool Process::isRunning(uint32_t pid) {
     return GetExitCodeProcess(handle.handle, &exitCode) && exitCode == STILL_ACTIVE;
 }
 
+std::string Process::imageName(uint32_t pid) {
+    const HandleGuard process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    if (process.valid()) {
+        wchar_t path[MAX_PATH]{};
+        DWORD size = MAX_PATH;
+        if (QueryFullProcessImageNameW(process.handle, 0, path, &size)) {
+            return std::filesystem::path(std::wstring(path, size)).filename().string();
+        }
+    }
+
+    return imagePathFromPeb(pid).filename().string();
+}
+
 bool Process::terminate(uint32_t pid) {
     const HandleGuard handle(OpenProcess(PROCESS_TERMINATE, FALSE, pid));
     if (!handle.valid()) return false;
@@ -231,7 +244,18 @@ bool Process::injectLibrary(uint32_t pid, const std::filesystem::path& dll, std:
             PROCESS_VM_WRITE | PROCESS_VM_READ,
         FALSE, pid));
     if (!process.valid()) {
-        return fail(std::format("OpenProcess: {}", lastErrorMessage(GetLastError())));
+        const DWORD code = GetLastError();
+        if (code == ERROR_INVALID_PARAMETER) {
+            // Windows has no process by that id: the one we were handed already exited.
+            return fail(std::format("le processus {} n'existe plus (OpenProcess: {})", pid,
+                                    lastErrorMessage(code)));
+        }
+        if (code == ERROR_ACCESS_DENIED) {
+            return fail(std::format(
+                "Windows a refusé l'accès au processus du jeu (OpenProcess: {}). "
+                "Lancez Velyx avec les mêmes droits que le jeu.", lastErrorMessage(code)));
+        }
+        return fail(std::format("OpenProcess: {}", lastErrorMessage(code)));
     }
 
     const std::wstring wide = std::filesystem::absolute(dll, ec).wstring();
