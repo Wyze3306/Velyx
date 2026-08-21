@@ -21,6 +21,7 @@
 #include "core/Math.hpp"
 #include "core/Paths.hpp"
 #include "core/Process.hpp"
+#include "core/Resources.hpp"
 #include "core/Strings.hpp"
 #include "launcher/account/AccountStore.hpp"
 #include "launcher/instance/InstanceManager.hpp"
@@ -829,6 +830,11 @@ void render(const Rect& client) {
 }
 
 std::filesystem::path fontDirectory() {
+    const auto unpacked = Paths::assets() / "fonts";
+
+    std::error_code ec;
+    if (std::filesystem::exists(unpacked, ec)) return unpacked;
+
     wchar_t buffer[MAX_PATH]{};
     GetModuleFileNameW(nullptr, buffer, MAX_PATH);
     return std::filesystem::path(buffer).parent_path() / "assets" / "fonts";
@@ -1050,6 +1056,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Paths::ensureLayout();
     Log::init(Paths::logs() / "launcher.log", false);
     Log::info(kLog, "Velyx Launcher {}", version::kFull);
+
+    resources::unpack(GetModuleHandleW(nullptr), Paths::root());
 
     InstanceManager::get().load();
     AccountStore::get().load();

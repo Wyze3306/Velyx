@@ -3,40 +3,62 @@ file(GLOB_RECURSE VELYX_LAUNCHER_SOURCES CONFIGURE_DEPENDS
 file(GLOB_RECURSE VELYX_LAUNCHER_HEADERS CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/*.hpp")
 
-# Everything the launcher needs ships inside the executable: the client DLL and
-# the interface fonts are linked in as resources and unpacked on first run.
-set(VELYX_PAYLOAD "${CMAKE_CURRENT_BINARY_DIR}/velyx_payload.rc")
+# Velyx ships as a single executable: the client DLL, the interface fonts and
+# the signature templates are linked in as resources and unpacked on first run.
+set(VELYX_PAYLOAD_SOURCES "")
+set(VELYX_PAYLOAD_TARGETS "")
 
-# windres glues adjacent quoted strings together the way a C compiler does, so the
-# path of one entry would swallow the name of the next. A neutral LANGUAGE statement
-# between entries puts a token in the way and keeps every path quoted, which is what
-# lets the build survive a source directory with a space in its name.
-set(VELYX_PAYLOAD_LINES "")
-
-function (velyx_payload_entry name file)
-    string(APPEND VELYX_PAYLOAD_LINES
-           "LANGUAGE 0x00, 0x00\n\"${name}\" VELYXFILE \"${file}\"\n")
-    set(VELYX_PAYLOAD_LINES "${VELYX_PAYLOAD_LINES}" PARENT_SCOPE)
-endfunction ()
-
-foreach (font IN ITEMS SpaceGrotesk-Regular SpaceGrotesk-Medium SpaceGrotesk-Bold
-                       JetBrainsMono-Regular JetBrainsMono-Medium)
-    velyx_payload_entry("assets/fonts/${font}.ttf" "${CMAKE_SOURCE_DIR}/assets/fonts/${font}.ttf")
+file(GLOB VELYX_FONT_FILES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/fonts/*")
+foreach (font IN LISTS VELYX_FONT_FILES)
+    file(RELATIVE_PATH relative "${CMAKE_SOURCE_DIR}" "${font}")
+    list(APPEND VELYX_PAYLOAD_SOURCES "${font}")
+    list(APPEND VELYX_PAYLOAD_TARGETS "${relative}")
 endforeach ()
 
 foreach (doc IN ITEMS README.md template.json)
-    velyx_payload_entry("assets/signatures/${doc}" "${CMAKE_SOURCE_DIR}/assets/signatures/${doc}")
+    list(APPEND VELYX_PAYLOAD_SOURCES "${CMAKE_SOURCE_DIR}/assets/signatures/${doc}")
+    list(APPEND VELYX_PAYLOAD_TARGETS "assets/signatures/${doc}")
 endforeach ()
 
-velyx_payload_entry("bin/Velyx.dll" "$<TARGET_FILE:Velyx>")
+# The resource compiler needs a plain path, so the freshly built DLL is staged
+# next to the generated script first.
+set(VELYX_PAYLOAD_DLL "${CMAKE_CURRENT_BINARY_DIR}/payload/Velyx.dll")
+add_custom_command(OUTPUT "${VELYX_PAYLOAD_DLL}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Velyx>" "${VELYX_PAYLOAD_DLL}"
+        DEPENDS Velyx
+        COMMENT "Staging Velyx.dll for the launcher payload"
+        VERBATIM)
+add_custom_target(velyx_payload_dll DEPENDS "${VELYX_PAYLOAD_DLL}")
 
-file(GENERATE OUTPUT "${VELYX_PAYLOAD}" CONTENT "${VELYX_PAYLOAD_LINES}")
+list(APPEND VELYX_PAYLOAD_SOURCES "${VELYX_PAYLOAD_DLL}")
+list(APPEND VELYX_PAYLOAD_TARGETS "bin/Velyx.dll")
+
+# Resource names go through the compiler uppercased, so each entry gets a
+# symbolic name and the manifest keeps the destination path it maps to.
+set(VELYX_PAYLOAD_RC "")
+set(VELYX_PAYLOAD_MAP "")
+list(LENGTH VELYX_PAYLOAD_TARGETS VELYX_PAYLOAD_COUNT)
+math(EXPR VELYX_PAYLOAD_LAST "${VELYX_PAYLOAD_COUNT} - 1")
+
+foreach (index RANGE ${VELYX_PAYLOAD_LAST})
+    list(GET VELYX_PAYLOAD_SOURCES ${index} entry_source)
+    list(GET VELYX_PAYLOAD_TARGETS ${index} entry_target)
+    string(APPEND VELYX_PAYLOAD_RC "VELYX_FILE_${index} VELYXFILE \"${entry_source}\"\n")
+    string(APPEND VELYX_PAYLOAD_MAP "VELYX_FILE_${index}=${entry_target}\n")
+endforeach ()
+
+set(VELYX_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/velyx_payload.manifest")
+file(WRITE "${VELYX_MANIFEST}" "${VELYX_PAYLOAD_MAP}")
+
+set(VELYX_PAYLOAD "${CMAKE_CURRENT_BINARY_DIR}/velyx_payload.rc")
+file(WRITE "${VELYX_PAYLOAD}" "${VELYX_PAYLOAD_RC}VELYX_MANIFEST VELYXMAP \"${VELYX_MANIFEST}\"\n")
 
 add_executable(VelyxLauncher WIN32 ${VELYX_LAUNCHER_SOURCES} ${VELYX_LAUNCHER_HEADERS}
         "${VELYX_PAYLOAD}")
 
-add_dependencies(VelyxLauncher Velyx)
-set_source_files_properties("${VELYX_PAYLOAD}" PROPERTIES GENERATED TRUE)
+add_dependencies(VelyxLauncher velyx_payload_dll)
+set_source_files_properties("${VELYX_PAYLOAD}" PROPERTIES
+        OBJECT_DEPENDS "${VELYX_PAYLOAD_DLL};${VELYX_MANIFEST};${VELYX_PAYLOAD_SOURCES}")
 
 set_target_properties(VelyxLauncher PROPERTIES
         OUTPUT_NAME "Velyx"
@@ -57,7 +79,7 @@ target_link_libraries(VelyxLauncher PRIVATE
         advapi32)
 
 if (NOT MSVC)
-    # -municode : mingw cherche wWinMain plutot que WinMain.
+    # mingw looks for WinMain unless -municode points it at wWinMain.
     target_compile_options(VelyxLauncher PRIVATE -municode)
     target_link_options(VelyxLauncher PRIVATE -municode -static -static-libgcc -static-libstdc++)
 endif ()

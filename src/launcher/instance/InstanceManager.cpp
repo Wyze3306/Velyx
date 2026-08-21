@@ -687,9 +687,14 @@ bool InstanceManager::launch(Instance& instance, std::string* error) {
 
     Sleep(2500);
 
-    wchar_t modulePath[MAX_PATH]{};
-    GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
-    const auto dll = std::filesystem::path(modulePath).parent_path() / "Velyx.dll";
+    auto dll = Paths::root() / "bin" / "Velyx.dll";
+
+    std::error_code ec;
+    if (!std::filesystem::exists(dll, ec)) {
+        wchar_t modulePath[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
+        dll = std::filesystem::path(modulePath).parent_path() / "Velyx.dll";
+    }
 
     std::string injectionError;
     if (!Process::injectLibrary(instance.pid, dll, &injectionError)) {
