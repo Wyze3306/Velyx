@@ -1,0 +1,37 @@
+name: release
+
+# Cut a release by pushing a tag:  git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish Velyx.exe and Velyx.dll
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -A x64 -DVELYX_CHANNEL=stable
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      # The launcher carries the client inside it, so Velyx.exe is all most
+      # people need. The DLL ships beside it for anyone injecting it themselves.
+      - name: Collect
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item build/bin/Release/Velyx.exe dist/
+          Copy-Item build/bin/Release/Velyx.dll dist/
+
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$env:GITHUB_REF_NAME" dist/Velyx.exe dist/Velyx.dll --generate-notes --title "$env:GITHUB_REF_NAME"

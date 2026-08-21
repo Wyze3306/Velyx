@@ -6,7 +6,6 @@
 (function () {
   'use strict';
 
-  var REPO = 'https://github.com/Wyze3306/Velyx';
   var API  = 'https://api.github.com/repos/Wyze3306/Velyx/releases/latest';
 
   /* ── the inventory ───────────────────────────────────────────── */
@@ -361,12 +360,22 @@
   function paintRelease() {
     var meta = document.getElementById('dl-meta');
     if (!release || !meta || !release.tag) return;
-    var size = release.size ? ' · ' + Math.round(release.size / 1048576) + ' ' + (lang === 'en' ? 'MB' : 'Mo') : '';
+    var size = release.exeSize ? ' · ' + Math.round(release.exeSize / 1048576) + ' ' + (lang === 'en' ? 'MB' : 'Mo') : '';
     var base = lang === 'en'
-      ? ' · Windows 10 and 11 · 64-bit · free and open source, GPL‑3.0'
-      : ' · Windows 10 et 11 · 64 bits · gratuit et open source, GPL‑3.0';
+      ? ' · Windows 10 and 11 · 64-bit · free and open source'
+      : ' · Windows 10 et 11 · 64 bits · gratuit et open source';
     meta.removeAttribute('data-en');
     meta.textContent = release.tag + size + base;
+  }
+
+  /* Every download link says which file it wants; until a release exists they
+     all lead to the releases page, which is the honest answer. */
+  function pointDownloads(exe, dll) {
+    var links = document.querySelectorAll('[data-dl]');
+    for (var i = 0; i < links.length; i++) {
+      var want = links[i].dataset.dl === 'dll' ? dll : exe;
+      if (want) links[i].href = want.browser_download_url;
+    }
   }
 
   function askRelease() {
@@ -375,15 +384,14 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (rel) {
         if (!rel || !rel.assets) return;
-        var exe = null;
+        var exe = null, dll = null;
         for (var i = 0; i < rel.assets.length; i++) {
-          if (/\.exe$/i.test(rel.assets[i].name)) { exe = rel.assets[i]; break; }
+          var name = rel.assets[i].name;
+          if (!exe && /\.exe$/i.test(name)) exe = rel.assets[i];
+          if (!dll && /\.dll$/i.test(name)) dll = rel.assets[i];
         }
-        release = { tag: rel.tag_name, size: exe ? exe.size : 0 };
-        if (exe) {
-          var btns = document.querySelectorAll('a[href="' + REPO + '/releases"]');
-          for (var b = 0; b < btns.length; b++) btns[b].href = exe.browser_download_url;
-        }
+        release = { tag: rel.tag_name, exeSize: exe ? exe.size : 0 };
+        pointDownloads(exe, dll);
         paintRelease();
       })
       .catch(function () {});

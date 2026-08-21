@@ -43,7 +43,7 @@
         <button type="button" class="seg-btn" data-lang="en" aria-pressed="false">EN</button>
       </div>
       <a class="btn btn-ghost hdr-gh" href="https://github.com/Wyze3306/Velyx" rel="noopener">GitHub</a>
-      <a class="btn btn-primary" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener" data-en="Download">Télécharger</a>
+      <a class="btn btn-primary" data-dl="exe" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener" data-en="Download">Télécharger</a>
     </div>
   </div>
 </header>
@@ -60,7 +60,7 @@
         <p class="lede" data-en="Your main and your alt side by side, each in its own window. And inside every game, a full client: the HUD you want, exactly where you want it.">Votre compte principal et votre alt côte à côte, chacun dans sa fenêtre. Et dans chaque partie, un client complet&nbsp;: le HUD que vous voulez, là où vous le voulez.</p>
 
         <div class="cta">
-          <a class="btn btn-primary btn-lg" id="dl" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener">
+          <a class="btn btn-primary btn-lg" id="dl" data-dl="exe" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v9M4.4 7.6 8 11.2l3.6-3.6M3 13.4h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
             <span data-en="Download Velyx.exe">Télécharger Velyx.exe</span>
           </a>
@@ -68,6 +68,10 @@
         </div>
 
         <p class="cta-meta" id="dl-meta" data-en="Windows 10 and 11 · 64-bit · free and open source">Windows 10 et 11 · 64 bits · gratuit et open source</p>
+        <p class="dl-alt">
+          <span data-en="Prefer to inject it yourself?">Vous préférez l'injecter vous-même&nbsp;?</span>
+          <a data-dl="dll" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener" data-en="Get Velyx.dll">Prenez Velyx.dll</a>
+        </p>
       </div>
 
       <div class="hero-show">
@@ -252,8 +256,10 @@
       </ol>
 
       <div class="steps-cta">
-        <a class="btn btn-primary btn-lg" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener" data-en="Download Velyx.exe">Télécharger Velyx.exe</a>
+        <a class="btn btn-primary btn-lg" data-dl="exe" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener" data-en="Download Velyx.exe">Télécharger Velyx.exe</a>
+        <a class="btn btn-ghost btn-lg" data-dl="dll" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener" data-en="Download Velyx.dll">Télécharger Velyx.dll</a>
       </div>
+      <p class="steps-note" data-en="Velyx.exe already carries the client inside it, so it is the one you want. Velyx.dll is there on its own for anyone who injects it with their own tool.">Velyx.exe contient déjà le client&nbsp;: c'est celui qu'il vous faut. Velyx.dll est là à part, pour ceux qui l'injectent avec leur propre outil.</p>
     </div>
   </section>
 

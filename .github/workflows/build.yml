@@ -31,7 +31,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: velyx-mingw
-          path: build/bin/Velyx.exe
+          path: |
+            build/bin/Velyx.exe
+            build/bin/Velyx.dll
 
   windows-msvc:
     name: Windows (MSVC x64)
@@ -48,4 +50,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: velyx-msvc
-          path: build/bin/Release/Velyx.exe
+          path: |
+            build/bin/Release/Velyx.exe
+            build/bin/Release/Velyx.dll
