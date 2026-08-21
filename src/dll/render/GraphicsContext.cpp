@@ -50,22 +50,25 @@ void GraphicsContext::setCommandQueue(ID3D12CommandQueue* queue) {
 
 void GraphicsContext::markDeviceLost() {
     const std::lock_guard lock(mutex_);
-    markDeviceLostLocked("device lost");
+    markDeviceLostLocked("device lost", Sync::Full);
 }
 
 // Callers that already hold the lock. The reason is logged rather than assumed: this
 // is now reached from a window resize as well as from a genuinely lost device.
-void GraphicsContext::markDeviceLostLocked(std::string_view reason) {
+void GraphicsContext::markDeviceLostLocked(std::string_view reason, Sync sync) {
     if (deviceLost_) return;
 
     deviceLost_ = true;
     ready_ = false;
     Log::warn(kLog, "{}, dropping graphics resources", reason);
 
-    releaseTargets();
+    releaseTargets(sync);
+    Log::info(kLog, "release: targets gone");
 
     DeviceLostEvent event;
     events().emit(event);
+
+    Log::info(kLog, "release: done");
 }
 
 // How long the window has to hold still before the overlay trusts its size again.
@@ -116,7 +119,7 @@ bool GraphicsContext::attach(IDXGISwapChain* swapChain) {
         // just the buffers, and the next settled frame builds it back.
         if (!targets_.empty() || d2dContext_) {
             Log::debug(kLog, "window is now {}x{}, going dark", clientWidth, clientHeight);
-            markDeviceLostLocked("window resized");
+            markDeviceLostLocked("window resized", Sync::None);
         }
         return false;
     }
@@ -177,8 +180,10 @@ bool GraphicsContext::attach(IDXGISwapChain* swapChain) {
     } else {
         // A different device, or none yet: everything has to go.
         if (swapChain_ != nullptr || deviceLost_) {
+            Log::info(kLog, "rebuild: dropping the interop devices");
             shutdown();
             deviceLost_ = false;
+            Log::info(kLog, "rebuild: interop devices dropped");
         }
 
         swapChain_ = swapChain;
@@ -237,7 +242,7 @@ void GraphicsContext::applyPendingRelease() {
         return;
     }
 
-    markDeviceLostLocked("window changed");
+    markDeviceLostLocked("window changed", Sync::None);
 }
 
 bool GraphicsContext::waitForGpu() {
@@ -446,7 +451,7 @@ bool GraphicsContext::createTargets(IDXGISwapChain* swapChain) {
 
 // Must run before the game's ResizeBuffers: DXGI refuses to resize while our
 // wrapped resources still hold references on the back buffers.
-void GraphicsContext::releaseTargets() {
+void GraphicsContext::releaseTargets(Sync sync) {
     const std::lock_guard lock(mutex_);
 
     if (drawing_) {
@@ -466,15 +471,20 @@ void GraphicsContext::releaseTargets() {
     if (d2dContext_) d2dContext_->SetTarget(nullptr);
 
     // Unbind and submit before anything is destroyed, so the flush never carries a
-    // command stream naming resources that are already gone.
-    if (context11_) {
-        context11_->ClearState();
-        context11_->Flush();
+    // command stream naming resources that are already gone. Then let the GPU finish
+    // with what was just submitted: a wrapped back buffer must not be freed while it
+    // is still being read.
+    //
+    // Both talk to the game's queue, and during a resize that is exactly what must not
+    // happen — the buffers were handed back at the end of the last frame, and the game
+    // synchronises its own queue to recreate a swapchain anyway.
+    if (sync == Sync::Full) {
+        if (context11_) {
+            context11_->ClearState();
+            context11_->Flush();
+        }
+        waitForGpu();
     }
-
-    // Then let the GPU finish with what was just submitted: a wrapped back buffer must
-    // not be freed while it is still being read.
-    waitForGpu();
 
     targets_.clear();
     wrappedFrom_.clear();

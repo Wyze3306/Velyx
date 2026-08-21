@@ -41,7 +41,11 @@ public:
     // Runs the release that releaseForResize() asked for, on the render thread.
     void applyPendingRelease();
 
-    void releaseTargets();
+    // Whether letting go may touch the game's own command queue. A resize may not:
+    // vkd3d-proton is recreating the swapchain from its present task while this runs,
+    // and a fence signalled on that queue from here is the last thing in the log.
+    enum class Sync { None, Full };
+    void releaseTargets(Sync sync = Sync::Full);
 
     void shutdown();
 
@@ -66,7 +70,7 @@ private:
 
     bool createDeviceResources(IDXGISwapChain* swapChain);
     bool createTargets(IDXGISwapChain* swapChain);
-    void markDeviceLostLocked(std::string_view reason);
+    void markDeviceLostLocked(std::string_view reason, Sync sync);
     bool createD2D(IUnknown* deviceForD2D);
 
     std::recursive_mutex mutex_;
