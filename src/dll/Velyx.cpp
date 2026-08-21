@@ -16,6 +16,7 @@
 #include "dll/feature/Services.hpp"
 #include "dll/feature/Updates.hpp"
 #include "dll/hook/HookManager.hpp"
+#include "dll/hook/hooks/GameInputHook.hpp"
 #include "dll/hook/hooks/SwapChainHook.hpp"
 #include "dll/hook/hooks/WindowHook.hpp"
 #include "dll/memory/Signatures.hpp"
@@ -156,6 +157,7 @@ void Velyx::bootstrap() {
     HookManager& hooks = HookManager::get();
     hooks.add<SwapChainHook>();
     hooks.add<WindowHook>();
+    hooks.add<GameInputHook>();
 
     SwapChainHook::setPresentCallback([this](IDXGISwapChain* swapChain) { onPresent(swapChain); });
 
