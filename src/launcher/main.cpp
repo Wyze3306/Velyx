@@ -915,11 +915,11 @@ bool createGraphics(HWND window) {
 
     loadBundledFonts();
 
-    g_fontHeading = makeFormat(21.f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    g_fontTitle = makeFormat(14.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    g_fontHeading = makeFormat(21.f, DWRITE_FONT_WEIGHT_BOLD);
+    g_fontTitle = makeFormat(14.5f, DWRITE_FONT_WEIGHT_MEDIUM);
     g_fontBody = makeFormat(13.f, DWRITE_FONT_WEIGHT_NORMAL);
     g_fontSmall = makeFormat(11.5f, DWRITE_FONT_WEIGHT_NORMAL);
-    g_fontCentre = makeFormat(12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+    g_fontCentre = makeFormat(12.5f, DWRITE_FONT_WEIGHT_MEDIUM,
                               DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER);
     g_fontCentreLight = makeFormat(12.f, DWRITE_FONT_WEIGHT_NORMAL,
                                    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER);

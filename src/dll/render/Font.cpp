@@ -13,6 +13,9 @@ constexpr const char* kLog = "Font";
 const char* kFallbackFamilies[] = {"Space Grotesk", "Segoe UI Variable Text", "Segoe UI", "Arial"};
 
 DWRITE_FONT_WEIGHT toDWrite(FontWeight weight) {
+    // The bundled family ships Regular, Medium and Bold. Asking for 600 would
+    // resolve upward to Bold and make every label heavier than designed.
+    if (weight == FontWeight::SemiBold) return DWRITE_FONT_WEIGHT_MEDIUM;
     return static_cast<DWRITE_FONT_WEIGHT>(static_cast<int>(weight));
 }
 

@@ -21,3 +21,4 @@ assets/signatures/*.json
 
 # Seeded design canvas, rebuilt from design/*.dc.html
 design/velyx-interface.html
+dist/
