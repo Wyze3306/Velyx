@@ -80,8 +80,17 @@
     m('utility', 'Marqueurs', 'Clip markers', 'Pose un repère horodaté pour retrouver un moment.', 'Drops a timestamped marker to find a moment again.')
   ];
 
-  /* the twelve shown in the hero, and the three that start on */
-  var HERO = ['FPS', 'Viseur', 'Keystrokes', 'Zoom', 'Mode performance', 'Filtres d’écran',
+  /* the launcher's rows: one instance per account, and they run together */
+
+  var INSTANCES = [
+    { av: 'M', fr: 'Principal', en: 'Main',    account: 'MainAccount',  ver: '1.26.44', on: true },
+    { av: 'S', fr: 'Second',    en: 'Second',  account: 'AltAccount',   ver: '1.26.44', on: true },
+    { av: 'B', fr: 'Build',     en: 'Build',   account: 'BuildAccount', ver: '1.26.44', on: false },
+    { av: 'T', fr: 'Tests',     en: 'Testing', account: null,           ver: '1.25.60', on: false }
+  ];
+
+  /* the twelve the menu shows here, and the three that start on */
+  var SHOWN = ['FPS', 'Viseur', 'Keystrokes', 'Zoom', 'Mode performance', 'Filtres d’écran',
               'Coordonnées', 'FOV dynamique (Java)', 'Mode capture', 'Graphique FPS',
               'Mode confidentialité', 'FreeLook'];
   var ON = { 'FPS': 1, 'Viseur': 1, 'Keystrokes': 1 };
@@ -95,7 +104,11 @@
       search: 'Rechercher un module',
       none: 'Aucun module ne correspond.',
       on1: 'module actif', onN: 'modules actifs',
-      swOn: 'Désactiver', swOff: 'Activer'
+      swOn: 'Désactiver', swOff: 'Activer',
+      noAcc: 'aucun compte', live: 'En cours', start: 'Lancer',
+      inst1: 'instance lancée', instN: 'instances lancées',
+      acc1: 'compte Microsoft', accN: 'comptes Microsoft',
+      stopA: 'Arrêter', startA: 'Lancer'
     },
     en: {
       title: 'Velyx — utility client for Minecraft Bedrock',
@@ -103,7 +116,11 @@
       search: 'Search for a module',
       none: 'No module matches that.',
       on1: 'module on', onN: 'modules on',
-      swOn: 'Turn off', swOff: 'Turn on'
+      swOn: 'Turn off', swOff: 'Turn on',
+      noAcc: 'no account', live: 'Running', start: 'Launch',
+      inst1: 'instance running', instN: 'instances running',
+      acc1: 'Microsoft account', accN: 'Microsoft accounts',
+      stopA: 'Stop', startA: 'Launch'
     }
   };
 
@@ -138,11 +155,12 @@
 
     try { localStorage.setItem('velyx-lang', next); } catch (e) {}
 
+    drawLauncher();
+    drawHudChips();
     drawChips();
     drawGrid();
     drawInventory();
     paintRelease();
-    first = false;
   }
 
   /* ── the menu in the hero ────────────────────────────────────── */
@@ -152,12 +170,11 @@
   var find  = document.getElementById('find');
   var count = document.getElementById('count');
   var pick  = 'all';
-  var first = true;
 
-  function heroList() {
+  function menuList() {
     var out = [];
     for (var i = 0; i < MODULES.length; i++) {
-      if (HERO.indexOf(MODULES[i].fr) !== -1) out.push(MODULES[i]);
+      if (SHOWN.indexOf(MODULES[i].fr) !== -1) out.push(MODULES[i]);
     }
     return out;
   }
@@ -172,7 +189,7 @@
   function drawChips() {
     if (!chips) return;
     var used = {};
-    var list = heroList();
+    var list = menuList();
     for (var i = 0; i < list.length; i++) used[list[i].cat] = 1;
 
     var html = '<button type="button" class="chip' + (pick === 'all' ? ' is-on' : '') +
@@ -188,7 +205,7 @@
   function drawGrid() {
     if (!grid) return;
     var q = fold(find && find.value ? find.value : '');
-    var list = heroList();
+    var list = menuList();
     var html = '';
     var shown = 0;
 
@@ -198,9 +215,8 @@
       if (q && fold(label(it) + ' ' + desc(it)).indexOf(q) === -1) continue;
 
       var on = !!ON[it.fr];
-      var delay = first ? ' style="--d:' + (0.30 + shown * 0.035).toFixed(2) + 's"' : '';
       html += '<button type="button" role="switch" aria-checked="' + (on ? 'true' : 'false') +
-              '" class="mcard' + (on ? ' is-on' : '') + (first ? ' lift' : '') + '"' + delay +
+              '" class="mcard' + (on ? ' is-on' : '') + '"' +
               ' data-id="' + it.fr.replace(/"/g, '&quot;') + '"' +
               ' aria-label="' + (on ? META[lang].swOn : META[lang].swOff) + ' — ' + label(it) + '">' +
                 '<span class="bar"></span>' +
@@ -219,7 +235,7 @@
 
   function drawCount() {
     if (!count) return;
-    var n = 0, list = heroList();
+    var n = 0, list = menuList();
     for (var i = 0; i < list.length; i++) if (ON[list[i].fr]) n++;
     count.textContent = n + ' ' + (n === 1 ? META[lang].on1 : META[lang].onN);
   }
@@ -244,14 +260,74 @@
       var b = e.target.closest ? e.target.closest('.chip') : null;
       if (!b) return;
       pick = b.dataset.cat;
-      first = false;
       drawChips();
       drawGrid();
     });
   }
 
   if (find) {
-    find.addEventListener('input', function () { first = false; drawGrid(); });
+    find.addEventListener('input', drawGrid);
+  }
+
+  /* ── the launcher, running in the hero ────────────────────────────────── */
+
+  var lcRows = document.getElementById('lc-rows');
+
+  function drawLauncher() {
+    if (!lcRows) return;
+    var html = '';
+    for (var i = 0; i < INSTANCES.length; i++) {
+      var it = INSTANCES[i];
+      var name = lang === 'en' ? it.en : it.fr;
+      var acc = it.account || META[lang].noAcc;
+      html += '<li>' +
+                '<i class="av av-' + (i + 1) + '">' + it.av + '</i>' +
+                '<span class="lc-name"><b>' + name + '</b><em>' + acc + '</em></span>' +
+                '<span class="mono lc-ver">' + it.ver + '</span>' +
+                '<button type="button" class="lc-go' + (it.on ? ' is-live' : '') + '" data-i="' + i +
+                '" aria-label="' + (it.on ? META[lang].stopA : META[lang].startA) + ' — ' + name + '">' +
+                  (it.on ? META[lang].live : META[lang].start) +
+                '</button>' +
+              '</li>';
+    }
+    lcRows.innerHTML = html;
+    drawLauncherCount();
+  }
+
+  function drawLauncherCount() {
+    var running = 0, accounts = 0;
+    for (var i = 0; i < INSTANCES.length; i++) {
+      if (!INSTANCES[i].on) continue;
+      running++;
+      if (INSTANCES[i].account) accounts++;
+    }
+    var c = document.getElementById('lc-count');
+    var a = document.getElementById('lc-acc');
+    if (c) c.textContent = running + ' ' + (running === 1 ? META[lang].inst1 : META[lang].instN);
+    if (a) a.textContent = accounts + ' ' + (accounts === 1 ? META[lang].acc1 : META[lang].accN);
+  }
+
+  if (lcRows) {
+    lcRows.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('.lc-go') : null;
+      if (!b) return;
+      var it = INSTANCES[+b.dataset.i];
+      it.on = !it.on;
+      drawLauncher();
+    });
+  }
+
+  /* ── the seventeen HUD elements ──────────────────────────────── */
+
+  function drawHudChips() {
+    var host = document.getElementById('hud-chips');
+    if (!host) return;
+    var html = '';
+    for (var i = 0; i < MODULES.length; i++) {
+      if (MODULES[i].cat !== 'hud') continue;
+      html += '<li>' + label(MODULES[i]) + '</li>';
+    }
+    host.innerHTML = html;
   }
 
   /* ── the full list ───────────────────────────────────────────── */
