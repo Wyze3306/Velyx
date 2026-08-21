@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string_view>
+
 #include <windows.h>
 #include <dxgi.h>
 
@@ -41,8 +43,14 @@ private:
     void bootstrap();
     void initialiseGraphicsOnce();
     void onPresent(IDXGISwapChain* swapChain);
-    void onResize(unsigned width, unsigned height);
+    void onSwapchainRebuilt(unsigned width, unsigned height);
+    void presentFrame(IDXGISwapChain* swapChain);
+    void onRenderFailure(std::string_view reason);
+
     void onDeviceLost(DeviceLostEvent& event);
+    void onGameClosing(GameClosingEvent& event);
+    void onWindowResized(SwapchainResizeEvent& event);
+    void onWindowDrag(WindowDragEvent& event);
     void shutdown();
 
     HMODULE self_ = nullptr;
@@ -53,6 +61,8 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> ready_{false};
     std::atomic<bool> ejecting_{false};
+    std::atomic<bool> closing_{false};
+    int renderFailures_ = 0;
 
     bool graphicsInitialised_ = false;
     bool screenshotMode_ = false;

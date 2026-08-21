@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 
 #include "dll/module/Module.hpp"
@@ -29,6 +30,7 @@ private:
 
     int step_ = 0;
     std::string preset_;
+    std::atomic<bool> finishRequested_{false};
     Animated appear_{0.f, 14.f};
 };
 

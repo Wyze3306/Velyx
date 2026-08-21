@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -21,6 +22,10 @@ private:
     void onMouse(MouseEvent& event);
     void onKey(KeyEvent& event);
 
+    // What is being dragged is read by every frame, so picking it up and putting it
+    // down both belong on the render thread. The message thread only queues.
+    void processInput();
+
     void drawGrid(Renderer& renderer, Vec2 screenSize);
     void drawBottomBar(Renderer& renderer, Vec2 screenSize);
     void drawSelection(Renderer& renderer, HudModule& element);
@@ -36,6 +41,9 @@ private:
     HudModule* hovered_ = nullptr;
     Vec2 dragOffset_;
     std::vector<Vec2> guides_;
+
+    std::mutex inputMutex_;
+    std::vector<MouseEvent> queuedMouse_;
 
     std::unordered_set<std::string> locked_;
     Animated fade_{0.f, 14.f};

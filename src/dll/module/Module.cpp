@@ -101,7 +101,10 @@ void Module::load(const nlohmann::json& json) {
     favourite_ = json.value("favourite", favourite_);
 
     if (json.contains("keybind")) {
-        keybind_ = std::get<Keybind>(fromJson(json["keybind"], SettingValue{keybind_}));
+        // std::get throws when the stored value is not the alternative asked for, and
+        // a profile written by an older build is exactly that case.
+        const SettingValue value = fromJson(json["keybind"], SettingValue{keybind_});
+        if (const Keybind* bind = std::get_if<Keybind>(&value)) keybind_ = *bind;
     }
 
     if (json.contains("settings")) settings.load(json["settings"]);

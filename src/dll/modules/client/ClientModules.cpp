@@ -510,8 +510,6 @@ public:
         addKeywords({"capture", "screenshot", "photo", "f2"});
     }
 
-    void onEnable() override { request(); }
-
 private:
     void onKey(KeyEvent& event) {
         if (!event.down || event.repeat) return;

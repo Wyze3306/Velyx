@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -11,6 +12,11 @@
 #include "dll/render/Renderer.hpp"
 
 namespace velyx {
+
+// A render thread that stalls (minimised window, device lost) must not let the
+// message thread queue input without end. Shared by every queue that input
+// crosses on its way from the window procedure to a frame.
+inline constexpr size_t kMaxQueuedInput = 256;
 
 struct UiId {
     uint32_t value = 0;
@@ -25,6 +31,12 @@ struct UiId {
 class Ui {
 public:
     static Ui& get();
+
+    // Once per overlay frame, around every interface that draws in it. Input used to
+    // be drained and cleared by beginFrame/endFrame, so when two interfaces drew in
+    // the same frame the first one swallowed the click and the second saw nothing.
+    void beginOverlayFrame();
+    void endOverlayFrame();
 
     void beginFrame(Renderer& renderer, float deltaSeconds);
     void endFrame();
@@ -96,11 +108,17 @@ public:
 
     [[nodiscard]] bool hovered(const UiId& id) const { return hot_ == id; }
 
+    // A card drawn by hand needs the same hit test as the built-in widgets: it is
+    // what makes an id hot, and both hovered() and the click read from that. Call
+    // it before animate(), so the hover lands on the frame that sees it.
+    bool hoverAndClick(const UiId& id, const Rect& rect, bool enabled = true);
+
 private:
     Ui() = default;
 
     [[nodiscard]] bool interactable(const Rect& rect) const;
-    bool hoverAndClick(const UiId& id, const Rect& rect, bool enabled = true);
+
+    void drainInput();
 
     Renderer* renderer_ = nullptr;
     float delta_ = 0.f;
@@ -122,6 +140,12 @@ private:
     bool focusedText_ = false;
     std::string pendingChars_;
     std::vector<int> pendingKeys_;
+
+    // Filled by the window procedure, applied by the render thread in drainInput().
+    mutable std::mutex inputMutex_;
+    std::vector<MouseEvent> queuedMouse_;
+    std::vector<KeyEvent> queuedKeys_;
+    std::vector<unsigned int> queuedChars_;
 
     std::vector<Rect> modalStack_;
 

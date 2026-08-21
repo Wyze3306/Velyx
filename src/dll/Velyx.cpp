@@ -1,9 +1,13 @@
 #include "Velyx.hpp"
 
+#include <format>
+#include <string_view>
+
 #include <velyx/Version.hpp>
 
 #include "core/Log.hpp"
 #include "core/Paths.hpp"
+#include "core/Strings.hpp"
 #include "dll/config/ClientConfig.hpp"
 #include "dll/config/ProfileManager.hpp"
 #include "dll/feature/CrashReporter.hpp"
@@ -19,6 +23,7 @@
 #include "dll/render/GraphicsContext.hpp"
 #include "dll/sdk/Game.hpp"
 #include "dll/ui/Theme.hpp"
+#include "dll/ui/Ui.hpp"
 
 namespace velyx {
 namespace {
@@ -75,6 +80,12 @@ void Velyx::bootstrap() {
     Log::setMinimumLevel(LogLevel::Debug);
     Log::init(Paths::logs() / "velyx.log", true);
 #else
+    // A release build injected into a game that dies without a word is the one case
+    // where the whole trace is worth having; the game inherits this from whatever
+    // launched it.
+    if (GetEnvironmentVariableW(L"VELYX_VERBOSE", nullptr, 0) > 0) {
+        Log::setMinimumLevel(LogLevel::Debug);
+    }
     Log::init(Paths::logs() / "velyx.log", false);
 #endif
 
@@ -128,10 +139,14 @@ void Velyx::bootstrap() {
     hooks.add<WindowHook>();
 
     SwapChainHook::setPresentCallback([this](IDXGISwapChain* swapChain) { onPresent(swapChain); });
-    SwapChainHook::setResizeCallback(
-        [this](unsigned width, unsigned height) { onResize(width, height); });
 
     events().on<DeviceLostEvent>(this, &Velyx::onDeviceLost, EventPriority::First);
+    events().on<GameClosingEvent>(this, &Velyx::onGameClosing, EventPriority::First);
+
+    // WM_SIZE reaches us before the game gets around to recreating its swapchain,
+    // which makes it the earliest moment to stop holding its buffers.
+    events().on<SwapchainResizeEvent>(this, &Velyx::onWindowResized, EventPriority::First);
+    events().on<WindowDragEvent>(this, &Velyx::onWindowDrag, EventPriority::First);
 
     if (!hooks.installAll()) {
         Log::fatal(kLog, "hooks could not be installed, stopping");
@@ -156,18 +171,56 @@ void Velyx::initialiseGraphicsOnce() {
     fonts.loadDirectory(selfDirectory(self_) / "assets" / "fonts");
     fonts.loadDirectory(Paths::assets() / "fonts");
 
+    // The title bar is the one place an injected client can say it is there without
+    // drawing a pixel, and it survives into screenshots and screen shares.
+    WindowHook::setTitle(std::format("Minecraft {} · Velyx {}",
+                                     Signatures::get().gameVersion(), version::kFull));
+
     graphicsInitialised_ = true;
     Log::info(kLog, "renderer ready ({}x{})", static_cast<int>(graphics.size().x),
               static_cast<int>(graphics.size().y));
 }
 
+// Velyx runs inside Minecraft's own process, so anything that escapes one of its
+// callbacks reaches no handler and ends the game through std::terminate — an exit
+// with no exception and no backtrace, which is exactly what was being seen. Every
+// boundary the game calls into is guarded, and a frame that throws twice in a row
+// stops drawing rather than taking the game down with it.
 void Velyx::onPresent(IDXGISwapChain* swapChain) {
+    try {
+        presentFrame(swapChain);
+        renderFailures_ = 0;
+    } catch (const std::exception& error) {
+        onRenderFailure(error.what());
+    } catch (...) {
+        onRenderFailure("unknown exception");
+    }
+}
+
+void Velyx::onRenderFailure(std::string_view reason) {
+    Log::error(kLog, "frame aborted after '{}' (module: {}), failure {}", reason,
+               crash::currentBreadcrumb(), renderFailures_ + 1);
+
+    GraphicsContext::get().endFrame();
+
+    if (++renderFailures_ >= 2) {
+        Log::fatal(kLog, "two frames in a row failed, the overlay stops drawing");
+        ready_.store(false, std::memory_order_release);
+    }
+}
+
+void Velyx::presentFrame(IDXGISwapChain* swapChain) {
     if (!ready() || ejecting_.load(std::memory_order_acquire)) return;
 
     GraphicsContext& graphics = GraphicsContext::get();
     if (!graphics.attach(swapChain)) return;
 
     WindowHook::attach(graphics.window());
+
+    if (graphics.takeResized()) {
+        const Vec2 size = graphics.size();
+        onSwapchainRebuilt(static_cast<unsigned>(size.x), static_cast<unsigned>(size.y));
+    }
 
     initialiseGraphicsOnce();
     if (!graphicsInitialised_) return;
@@ -195,10 +248,14 @@ void Velyx::onPresent(IDXGISwapChain* swapChain) {
     frame.screenSize = screenSize_;
     events().emit(frame);
 
+    modules().applyPendingToggles();
+
     if (!graphics.beginFrame()) return;
 
     if (renderer_.begin(graphics.d2d(), screenSize_, delta_)) {
         renderer_.setEffectsEnabled(theme().blur);
+
+        ui().beginOverlayFrame();
 
         RenderEvent render;
         render.renderer = &renderer_;
@@ -213,19 +270,53 @@ void Velyx::onPresent(IDXGISwapChain* swapChain) {
         top.deltaSeconds = delta_;
         events().emit(top);
 
+        ui().endOverlayFrame();
         renderer_.end();
     }
 
     graphics.endFrame();
 }
 
-void Velyx::onResize(unsigned width, unsigned height) {
-    SwapchainResizeEvent event;
-    event.width = width;
-    event.height = height;
-    events().emit(event);
+// The render thread's own announcement, made once the overlay has been rebuilt for a
+// size it can trust. It runs here and nowhere else: the font cache and every module's
+// layout belong to the thread that draws them, and the resize arrives on another.
+void Velyx::onSwapchainRebuilt(unsigned width, unsigned height) {
+    try {
+        FontManager::get().invalidate();
 
-    FontManager::get().invalidate();
+        SwapchainResizeEvent event;
+        event.width = width;
+        event.height = height;
+        events().emit(event);
+    } catch (const std::exception& error) {
+        Log::error(kLog, "relayout for {}x{} failed: {} (module: {})", width, height, error.what(),
+                   crash::currentBreadcrumb());
+    } catch (...) {
+        Log::error(kLog, "relayout for {}x{} failed (module: {})", width, height,
+                   crash::currentBreadcrumb());
+    }
+}
+
+void Velyx::onWindowResized(SwapchainResizeEvent& event) {
+    // Only the window is news. The event above is this same type, and letting it come
+    // back through here would have every rebuild ask for another release: the overlay
+    // would tear itself down and build itself back up for as long as the game ran.
+    if (!event.fromWindow) return;
+
+    GraphicsContext::get().releaseForResize();
+}
+
+void Velyx::onWindowDrag(WindowDragEvent& event) {
+    GraphicsContext::get().setWindowMoving(event.dragging);
+}
+
+void Velyx::onGameClosing(GameClosingEvent& event) {
+    if (closing_.exchange(true, std::memory_order_acq_rel)) return;
+
+    // Only the session flag: the render thread is still running, so touching the
+    // profiles or the modules from here would race the frame being drawn.
+    config().markSessionEnded();
+    Log::info(kLog, "the game is closing, session marked clean");
 }
 
 void Velyx::onDeviceLost(DeviceLostEvent& event) {

@@ -82,6 +82,9 @@ private:
     void onWorldJoin(WorldJoinEvent& event);
 
     std::vector<Profile> profiles_;
+    // True while switchTo() is applying a profile: see saveCurrent().
+    bool switching_ = false;
+
     Profile current_;
     bool autoSwitchEnabled_ = true;
     bool loaded_ = false;

@@ -1,5 +1,7 @@
 #include "GraphicsContext.hpp"
 
+#include <utility>
+
 #include "core/Log.hpp"
 #include "dll/event/Events.hpp"
 
@@ -60,28 +62,208 @@ void GraphicsContext::markDeviceLost() {
     events().emit(event);
 }
 
+// How long the window has to hold still before the overlay trusts its size again.
+// A drag delivers a WM_SIZE every few dozen milliseconds, so anything shorter puts
+// the rebuild back inside the drag.
+constexpr uint64_t kSettleMs = 250;
+
+// The description and the client rect do not always agree — vkd3d-proton reallocates
+// its swapchain on its own schedule — and waiting forever for them to would leave the
+// overlay dark. Past this, the window has been quiet long enough that the buffers are
+// safe whatever the description says.
+constexpr uint64_t kForceMs = 1500;
+
 bool GraphicsContext::attach(IDXGISwapChain* swapChain) {
     if (!swapChain) return false;
 
+    applyPendingRelease();
+
     const std::lock_guard lock(mutex_);
 
-    if (ready_ && swapChain_ == swapChain && !deviceLost_) return true;
-
-    if (swapChain_ != swapChain || deviceLost_) {
-        shutdown();
-        deviceLost_ = false;
+    // The client rect is the one size that is true on both stacks. DXGI's description
+    // does not move when vkd3d-proton reallocates underneath, and the game never calls
+    // ResizeBuffers there, so nothing else reports the change — and drawing into
+    // buffers that no longer describe the window is what takes the process down.
+    HWND window = window_;
+    if (!window) {
+        DXGI_SWAP_CHAIN_DESC desc{};
+        if (SUCCEEDED(swapChain->GetDesc(&desc))) window = desc.OutputWindow;
     }
 
-    swapChain_ = swapChain;
+    RECT client{};
+    unsigned clientWidth = 0;
+    unsigned clientHeight = 0;
+    if (window && GetClientRect(window, &client)) {
+        clientWidth = static_cast<unsigned>(client.right - client.left);
+        clientHeight = static_cast<unsigned>(client.bottom - client.top);
+    }
 
-    if (!createDeviceResources(swapChain)) return false;
-    if (!createTargets(swapChain)) return false;
+    if (clientWidth != lastClientWidth_ || clientHeight != lastClientHeight_) {
+        lastClientWidth_ = clientWidth;
+        lastClientHeight_ = clientHeight;
+        noteWindowChanged();
+
+        // Let go now rather than at the rebuild: the game is recreating its swapchain
+        // while the window moves, and it must not find our references on the buffers
+        // it is destroying.
+        if (!targets_.empty()) {
+            Log::debug(kLog, "window is now {}x{}, going dark", clientWidth, clientHeight);
+            releaseTargets();
+        }
+        return false;
+    }
+
+    // Minimised: there is nothing to draw on and no size to build for.
+    if (clientWidth == 0 || clientHeight == 0) return false;
+
+    if (ready_ && swapChain_ == swapChain && !deviceLost_ && !targets_.empty()) return true;
+
+    // Everything past here rebuilds GPU resources from the swapchain, so it may only
+    // run once the window has finished moving. Rebuilding mid-drag is what the crash
+    // on a large resize was: the buffers were handed over, then replaced underneath
+    // before the first frame reached them.
+    if (windowMoving_.load(std::memory_order_acquire)) return false;
+
+    const uint64_t quiet = GetTickCount64() - lastChangeMs_.load(std::memory_order_acquire);
+    if (quiet < kSettleMs) return false;
+
+    DXGI_SWAP_CHAIN_DESC desc{};
+    if (FAILED(swapChain->GetDesc(&desc))) return false;
+
+    const bool agrees =
+        desc.BufferDesc.Width == clientWidth && desc.BufferDesc.Height == clientHeight;
+    if (!agrees && quiet < kForceMs) return false;
+
+    // A different swapchain does not mean a different device: the game recreates its
+    // swapchain on every window change, but the device behind it lives on. Only the
+    // buffers are new, so only the targets are rebuilt — tearing the 11on12 and D2D
+    // devices down and back up seven times in nine seconds is churn the process does
+    // not need and did not always survive.
+    bool sameDevice = false;
+    if (!deviceLost_ && d2dContext_) {
+        if (backend_ == Backend::D3D12 && device12_) {
+            ComPtr<ID3D12Device> device;
+            sameDevice = SUCCEEDED(swapChain->GetDevice(
+                             __uuidof(ID3D12Device), reinterpret_cast<void**>(device.put()))) &&
+                         device.get() == device12_.get();
+        } else if (backend_ == Backend::D3D11 && device11_) {
+            ComPtr<ID3D11Device> device;
+            sameDevice = SUCCEEDED(swapChain->GetDevice(
+                             __uuidof(ID3D11Device), reinterpret_cast<void**>(device.put()))) &&
+                         device.get() == device11_.get();
+        }
+    }
+
+    Log::debug(kLog, "rebuild: client {}x{}, buffers {}x{} x{}, quiet {} ms, {} device",
+               clientWidth, clientHeight, desc.BufferDesc.Width, desc.BufferDesc.Height,
+               desc.BufferCount, quiet, sameDevice ? "same" : "new");
+
+    releaseTargets();
+
+    if (sameDevice) {
+        swapChain_ = swapChain;
+        swapChain3_.reset();
+        swapChain->QueryInterface(__uuidof(IDXGISwapChain3),
+                                  reinterpret_cast<void**>(swapChain3_.put()));
+        window_ = desc.OutputWindow;
+    } else {
+        // A different device, or none yet: everything has to go.
+        if (swapChain_ != nullptr || deviceLost_) {
+            shutdown();
+            deviceLost_ = false;
+        }
+
+        swapChain_ = swapChain;
+        if (!createDeviceResources(swapChain)) return false;
+    }
+
+    if (!createTargets(swapChain)) {
+        Log::warn(kLog, "rebuild: createTargets failed");
+        return false;
+    }
+
+    // createTargets sizes itself from the description; where the window disagrees, the
+    // window is the one the client lays out against.
+    if (agrees) {
+        size_ = {static_cast<float>(clientWidth), static_cast<float>(clientHeight)};
+    }
 
     ready_ = true;
-    Log::info(kLog, "overlay attached ({} backend, {}x{})",
-              backend_ == Backend::D3D12 ? "D3D12/11on12" : "D3D11",
-              static_cast<int>(size_.x), static_cast<int>(size_.y));
+    resized_ = true;
+
+    if (sameDevice) {
+        Log::info(kLog, "overlay rebuilt for {}x{}", static_cast<int>(size_.x),
+                  static_cast<int>(size_.y));
+    } else {
+        Log::info(kLog, "overlay attached ({} backend, {}x{})",
+                  backend_ == Backend::D3D12 ? "D3D12/11on12" : "D3D11",
+                  static_cast<int>(size_.x), static_cast<int>(size_.y));
+    }
     return true;
+}
+
+void GraphicsContext::noteWindowChanged() {
+    lastChangeMs_.store(GetTickCount64(), std::memory_order_release);
+}
+
+void GraphicsContext::setWindowMoving(bool moving) {
+    windowMoving_.store(moving, std::memory_order_release);
+    noteWindowChanged();
+}
+
+// Called from the window procedure, so it must not do any of the work: waiting on a
+// fence here froze the game's message pump — and, through the context lock, the render
+// thread with it — in the middle of a resize. It only leaves a note.
+void GraphicsContext::releaseForResize() {
+    noteWindowChanged();
+    releasePending_.store(true, std::memory_order_release);
+}
+
+// The render thread's side of that note, run before anything touches the targets.
+void GraphicsContext::applyPendingRelease() {
+    if (!releasePending_.exchange(false, std::memory_order_acq_rel)) return;
+
+    const std::lock_guard lock(mutex_);
+    if (targets_.empty()) {
+        ready_ = false;
+        return;
+    }
+
+    Log::info(kLog, "window changed, letting go of the back buffers");
+
+    releaseTargets();
+    Log::info(kLog, "release: done");
+}
+
+bool GraphicsContext::waitForGpu() {
+    if (!device12_ || !commandQueue_) return false;
+
+    ComPtr<ID3D12Fence> fence;
+    if (FAILED(device12_->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence),
+                                      reinterpret_cast<void**>(fence.put())))) {
+        return false;
+    }
+
+    const HANDLE done = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!done) return false;
+
+    bool waited = false;
+    if (SUCCEEDED(commandQueue_->Signal(fence.get(), 1))) {
+        if (fence->GetCompletedValue() < 1 &&
+            SUCCEEDED(fence->SetEventOnCompletion(1, done))) {
+            waited = WaitForSingleObject(done, 200) == WAIT_OBJECT_0;
+        } else {
+            waited = true;
+        }
+    }
+
+    CloseHandle(done);
+    return waited;
+}
+
+bool GraphicsContext::takeResized() {
+    const std::lock_guard lock(mutex_);
+    return std::exchange(resized_, false);
 }
 
 bool GraphicsContext::createDeviceResources(IDXGISwapChain* swapChain) {
@@ -198,6 +380,7 @@ bool GraphicsContext::createTargets(IDXGISwapChain* swapChain) {
     const UINT bufferCount = backend_ == Backend::D3D12 ? desc.BufferCount : 1;
     targets_.clear();
     targets_.resize(bufferCount);
+    wrappedFrom_.assign(bufferCount, nullptr);
 
     const D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
@@ -214,6 +397,8 @@ bool GraphicsContext::createTargets(IDXGISwapChain* swapChain) {
                 Log::error(kLog, "GetBuffer({}) failed", i);
                 return false;
             }
+
+            wrappedFrom_[i] = backBuffer.get();
 
             D3D11_RESOURCE_FLAGS flags{};
             flags.BindFlags = D3D11_BIND_RENDER_TARGET;
@@ -259,19 +444,38 @@ bool GraphicsContext::createTargets(IDXGISwapChain* swapChain) {
 void GraphicsContext::releaseTargets() {
     const std::lock_guard lock(mutex_);
 
-    if (drawing_ && d2dContext_) {
-        d2dContext_->EndDraw();
+    if (drawing_) {
+        Log::debug(kLog, "releaseTargets: a frame was still open");
         drawing_ = false;
+        if (d2dContext_) d2dContext_->EndDraw();
+
+        // A wrapped back buffer has to go back to 11on12 before it is destroyed.
+        // ResizeBuffers lands mid-frame when the game goes fullscreen, and dropping
+        // a still-acquired resource there takes the whole process down.
+        if (backend_ == Backend::D3D12 && device11On12_ && currentBuffer_ < targets_.size()) {
+            ID3D11Resource* wrapped = targets_[currentBuffer_].wrapped.get();
+            device11On12_->ReleaseWrappedResources(&wrapped, 1);
+        }
     }
 
     if (d2dContext_) d2dContext_->SetTarget(nullptr);
 
-    targets_.clear();
-
+    // Unbind and submit before anything is destroyed. The context still names these
+    // buffers; dropping them first left the flush below submitting a command stream
+    // that referred to resources already freed, and it was the game's next present
+    // that fell over it — which is why the overlay only took the game down when it
+    // had actually drawn into them that frame.
     if (context11_) {
         context11_->ClearState();
         context11_->Flush();
     }
+
+    // Then let the GPU finish with what was just submitted, so a wrapped back buffer
+    // is never freed while it is still being read.
+    waitForGpu();
+
+    targets_.clear();
+    wrappedFrom_.clear();
 
     ready_ = false;
 }
@@ -296,12 +500,20 @@ void GraphicsContext::shutdown() {
     swapChain_ = nullptr;
     backend_ = Backend::None;
     ready_ = false;
+    wrappedFrom_.clear();
+    lastClientWidth_ = 0;
+    lastClientHeight_ = 0;
 }
 
 bool GraphicsContext::beginFrame() {
-    const std::lock_guard lock(mutex_);
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
 
     if (!ready_ || drawing_ || targets_.empty() || !d2dContext_) return false;
+
+    // The window procedure may have asked for a release since attach() ran. Starting a
+    // frame on buffers already spoken for is the race the whole settle dance exists to
+    // avoid, and the note costs one atomic read to honour.
+    if (releasePending_.load(std::memory_order_acquire)) return false;
 
     currentBuffer_ = 0;
     if (backend_ == Backend::D3D12) {
@@ -317,13 +529,22 @@ bool GraphicsContext::beginFrame() {
     d2dContext_->SetTransform(D2D1::Matrix3x2F::Identity());
 
     drawing_ = true;
+
+    // The draw calls between here and endFrame() run without the lock otherwise,
+    // while ResizeBuffers arrives on another thread and frees the very targets they
+    // are writing to — going fullscreen with the menu open is what hit it. Holding
+    // the frame's lock makes that resize wait for the frame instead.
+    frameLock_ = std::move(lock);
     return true;
 }
 
 void GraphicsContext::endFrame() {
     const std::lock_guard lock(mutex_);
 
-    if (!drawing_) return;
+    if (!drawing_) {
+        frameLock_ = {};
+        return;
+    }
     drawing_ = false;
 
     const HRESULT hr = d2dContext_->EndDraw();
@@ -345,6 +566,8 @@ void GraphicsContext::endFrame() {
     } else if (FAILED(hr)) {
         Log::warn(kLog, "EndDraw failed (0x{:08X})", static_cast<unsigned>(hr));
     }
+
+    frameLock_ = {};
 }
 
 }

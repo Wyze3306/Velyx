@@ -61,6 +61,7 @@ Onboarding::Onboarding()
 void Onboarding::onEnable() {
     step_ = 0;
     preset_.clear();
+    finishRequested_.store(false, std::memory_order_release);
     appear_.set(0.f);
     appear_.to(1.f);
     WindowHook::setCaptureInput(true);
@@ -74,7 +75,10 @@ void Onboarding::onMouse(MouseEvent& event) {
 }
 
 void Onboarding::onKey(KeyEvent& event) {
-    if (event.down && event.key == VK_ESCAPE) finish();
+    // finish() disables the module, which unsubscribes these very handlers and
+    // writes the configuration to disk. Both belong on the render thread, where
+    // the rest of the assistant already runs.
+    if (event.down && event.key == VK_ESCAPE) finishRequested_.store(true, std::memory_order_release);
     ui().feedKey(event);
     event.cancel();
 }
@@ -165,6 +169,7 @@ void Onboarding::drawStyle(const Rect& body) {
 
         const UiId id("onboard_theme", static_cast<int>(i));
         const bool current = entry.name == active.name;
+        const bool pressed = gui.hoverAndClick(id, card);
         const float hover = gui.animate(id, gui.hovered(id));
 
         gui.renderer().fillRounded(card, entry.background, entry.panelRadius);
@@ -184,7 +189,7 @@ void Onboarding::drawStyle(const Rect& body) {
                                   card.bottom - 12.f},
                  entry.text, 12.5f, FontWeight::SemiBold);
 
-        if (gui.hovered(id) && gui.clicked()) ThemeManager::get().apply(entry.name);
+        if (pressed) ThemeManager::get().apply(entry.name);
     }
 
     bool rgb = active.rgbAccent;
@@ -212,6 +217,7 @@ void Onboarding::drawUsage(const Rect& body) {
 
         const UiId id("onboard_preset", static_cast<int>(i));
         const bool selected = preset_ == preset.id;
+        const bool pressed = gui.hoverAndClick(id, card);
         const float hover = gui.animate(id, gui.hovered(id));
 
         gui.renderer().fillRounded(card,
@@ -229,7 +235,7 @@ void Onboarding::drawUsage(const Rect& body) {
                                           card.bottom - 8.f},
                  active.textMuted, 12.f);
 
-        if (gui.hovered(id) && gui.clicked()) applyPreset(preset.id);
+        if (pressed) applyPreset(preset.id);
     }
 }
 
@@ -271,6 +277,12 @@ void Onboarding::drawKeys(const Rect& body) {
                 if (Module* palette = modules().find("command_palette")) palette->keybind() = value;
             } else if (bind == &settings.hudEditorKey) {
                 if (Module* editor = modules().find("hud_editor")) editor->keybind() = value;
+            } else if (bind == &settings.screenshotKey) {
+                // The capture mode carries its own key rather than a module keybind,
+                // so this one has to be written where the module actually reads it.
+                if (Module* capture = modules().find("screenshot_mode")) {
+                    capture->settings.set("captureKey", SettingValue{value});
+                }
             }
             settings.save();
         }
@@ -313,6 +325,11 @@ void Onboarding::drawDone(const Rect& body) {
 }
 
 void Onboarding::onRender(RenderTopEvent& event) {
+    if (finishRequested_.exchange(false, std::memory_order_acq_rel)) {
+        finish();
+        return;
+    }
+
     Renderer& renderer = *event.renderer;
     const auto& active = theme();
 

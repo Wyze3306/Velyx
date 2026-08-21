@@ -24,8 +24,29 @@ constexpr const char* kLog = "Crash";
 thread_local const char* t_breadcrumb = nullptr;
 std::atomic<bool> g_reporting{false};
 LPTOP_LEVEL_EXCEPTION_FILTER g_previousFilter = nullptr;
+PVOID g_vectoredHandle = nullptr;
 uintptr_t g_selfBase = 0;
 size_t g_selfSize = 0;
+
+bool insideSelf(const void* address) {
+    const auto value = reinterpret_cast<uintptr_t>(address);
+    return g_selfSize != 0 && value >= g_selfBase && value < g_selfBase + g_selfSize;
+}
+
+bool fatal(DWORD code) {
+    switch (code) {
+        case EXCEPTION_ACCESS_VIOLATION:
+        case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+        case EXCEPTION_ILLEGAL_INSTRUCTION:
+        case EXCEPTION_INT_DIVIDE_BY_ZERO:
+        case EXCEPTION_IN_PAGE_ERROR:
+        case EXCEPTION_PRIV_INSTRUCTION:
+        case EXCEPTION_STACK_OVERFLOW:
+            return true;
+        default:
+            return false;
+    }
+}
 
 std::string timestampFile() {
     const auto now = std::chrono::system_clock::now();
@@ -137,6 +158,25 @@ LONG WINAPI handler(EXCEPTION_POINTERS* info) {
     return g_previousFilter ? g_previousFilter(info) : EXCEPTION_CONTINUE_SEARCH;
 }
 
+LONG CALLBACK vectoredHandler(EXCEPTION_POINTERS* info) {
+    if (!info || !info->ExceptionRecord || !info->ContextRecord) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    if (!fatal(info->ExceptionRecord->ExceptionCode)) return EXCEPTION_CONTINUE_SEARCH;
+    if (!insideSelf(info->ExceptionRecord->ExceptionAddress)) return EXCEPTION_CONTINUE_SEARCH;
+    if (g_reporting.exchange(true)) return EXCEPTION_CONTINUE_SEARCH;
+
+    writeReport(info);
+    Log::error(kLog, "fault inside Velyx at 0x{:X} ({}), report written",
+               reinterpret_cast<uintptr_t>(info->ExceptionRecord->ExceptionAddress),
+               exceptionName(info->ExceptionRecord->ExceptionCode));
+
+    g_reporting.store(false);
+
+    // Whoever would have handled it still gets to: this only records.
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 } // namespace
 
 Breadcrumb::Breadcrumb(const char* label) : previous_(t_breadcrumb) { t_breadcrumb = label; }
@@ -147,10 +187,22 @@ const char* currentBreadcrumb() { return t_breadcrumb ? t_breadcrumb : ""; }
 void install() {
     resolveSelfRange();
     g_previousFilter = SetUnhandledExceptionFilter(&handler);
+
+    // The game installs its own unhandled filter and wraps its frames in __try, so
+    // ours may never run — which is why no report was ever written for a fault that
+    // clearly happened. A vectored handler sees the exception first; it is limited to
+    // fatal codes raised from inside this DLL, so the game's own handled exceptions
+    // are left alone.
+    g_vectoredHandle = AddVectoredExceptionHandler(1, &vectoredHandler);
+
     Log::debug(kLog, "crash reporting armed");
 }
 
 void uninstall() {
+    if (g_vectoredHandle) {
+        RemoveVectoredExceptionHandler(g_vectoredHandle);
+        g_vectoredHandle = nullptr;
+    }
     SetUnhandledExceptionFilter(g_previousFilter);
     g_previousFilter = nullptr;
 }

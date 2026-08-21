@@ -40,12 +40,28 @@ ResizeBuffersFn g_originalResizeBuffers = nullptr;
 ExecuteCommandListsFn g_originalExecuteCommandLists = nullptr;
 
 SwapChainHook::PresentCallback g_onPresent;
-SwapChainHook::ResizeCallback g_onResize;
 std::atomic<bool> g_presenting{false};
+
+// Every detour below is a boundary the game calls across. An exception that escapes
+// one of them reaches DXGI, which has no handler for it, and the process ends through
+// std::terminate — an abort with no backtrace, which is what resizing the window was
+// producing. Nothing may leave these functions.
+template <typename Fn>
+void guarded(const char* what, Fn&& body) {
+    try {
+        body();
+    } catch (const std::exception& error) {
+        Log::error(kLog, "{} threw: {}", what, error.what());
+    } catch (...) {
+        Log::error(kLog, "{} threw", what);
+    }
+}
 
 void dispatchPresent(IDXGISwapChain* swapChain) {
     g_presenting.store(true, std::memory_order_relaxed);
-    if (g_onPresent) g_onPresent(swapChain);
+    guarded("present", [&] {
+        if (g_onPresent) g_onPresent(swapChain);
+    });
 }
 
 HRESULT STDMETHODCALLTYPE presentDetour(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
@@ -64,15 +80,30 @@ HRESULT STDMETHODCALLTYPE resizeBuffersDetour(IDXGISwapChain* swapChain, UINT bu
                                               UINT width, UINT height, DXGI_FORMAT format,
                                               UINT flags) {
 
-    GraphicsContext::get().releaseTargets();
-    if (g_onResize) g_onResize(width, height);
+    // Whether the game resizes from the thread that draws decides whether the frame
+    // can be torn out from under itself, and whether holding the frame's lock across
+    // a resize is safe or a way to deadlock DXGI. Said once, on the first resize.
+    static std::atomic<bool> reported{false};
+    if (!reported.exchange(true)) {
+        Log::info(kLog, "ResizeBuffers on thread {} ({}x{})", GetCurrentThreadId(), width, height);
+    }
+
+    // Only the graphics context is touched here, and only to let go: this runs on
+    // whichever thread the game resizes from, and the client's own reaction to a new
+    // size — relayout, fonts — belongs to the render thread, which picks it up from
+    // takeResized() once the targets are back.
+    guarded("resize", [&] {
+        GraphicsContext& graphics = GraphicsContext::get();
+        graphics.releaseTargets();
+        graphics.releaseForResize();
+    });
 
     return g_originalResizeBuffers(swapChain, bufferCount, width, height, format, flags);
 }
 
 void STDMETHODCALLTYPE executeCommandListsDetour(ID3D12CommandQueue* queue, UINT count,
                                                  ID3D12CommandList* const* lists) {
-    GraphicsContext::get().setCommandQueue(queue);
+    guarded("command queue", [&] { GraphicsContext::get().setCommandQueue(queue); });
     g_originalExecuteCommandLists(queue, count, lists);
 }
 
@@ -110,10 +141,6 @@ bool SwapChainHook::presenting() { return g_presenting.load(std::memory_order_re
 
 void SwapChainHook::setPresentCallback(PresentCallback callback) {
     g_onPresent = std::move(callback);
-}
-
-void SwapChainHook::setResizeCallback(ResizeCallback callback) {
-    g_onResize = std::move(callback);
 }
 
 bool SwapChainHook::captureVTables(void** swapChainVTable, size_t swapChainCount,

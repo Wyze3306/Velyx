@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <mutex>
 #include <format>
 #include <string>
 
@@ -19,6 +20,16 @@ constexpr const char* kLog = "Input";
 HWND g_window = nullptr;
 WNDPROC g_originalProc = nullptr;
 std::atomic<bool> g_capture{false};
+
+// attach() runs from Present, so it stamps the render thread. Whether the window
+// procedure lands on that same thread decides whether every module's input handler
+// races the frame it is drawn in, so it is worth saying out loud, once.
+std::atomic<uint32_t> g_renderThread{0};
+std::atomic<bool> g_threadingReported{false};
+
+std::mutex g_titleMutex;
+std::wstring g_pendingTitle;
+std::atomic<bool> g_titlePending{false};
 Vec2 g_mouse;
 bool g_keys[256]{};
 
@@ -92,6 +103,9 @@ void WindowHook::attach(HWND window) {
         return;
     }
 
+    g_renderThread.store(GetCurrentThreadId(), std::memory_order_release);
+    g_threadingReported.store(false, std::memory_order_release);
+
     Log::info(kLog, "attached to window {:#x}", reinterpret_cast<uintptr_t>(window));
 }
 
@@ -111,6 +125,25 @@ void WindowHook::setCaptureInput(bool capture) {
 }
 
 bool WindowHook::captureInput() { return g_capture.load(std::memory_order_relaxed); }
+
+// SetWindowTextW sends WM_SETTEXT synchronously, so calling it from the render
+// thread parks that thread until the window's own thread pumps — which is how the
+// overlay froze the game. The title is queued and set from the procedure, where it
+// is a plain call on the owning thread.
+void WindowHook::setTitle(std::string_view title) {
+    const std::wstring wide = strings::toUtf16(title);
+    {
+        const std::lock_guard<std::mutex> guard(g_titleMutex);
+        g_pendingTitle = wide;
+    }
+    g_titlePending.store(true, std::memory_order_release);
+
+    // An idle window sends no messages, so the queued title could sit there until the
+    // player moves the mouse. A posted WM_NULL wakes the procedure on the very next
+    // pump — and unlike SendMessage it returns immediately, so the render thread that
+    // asked for the title never waits on the thread that owns the window.
+    if (const HWND window = g_window) PostMessageW(window, WM_NULL, 0, 0);
+}
 
 Vec2 WindowHook::mousePosition() { return g_mouse; }
 
@@ -152,8 +185,40 @@ std::string WindowHook::keyName(int virtualKey) {
 }
 
 LRESULT CALLBACK WindowHook::wndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    if (!g_threadingReported.exchange(true, std::memory_order_acq_rel)) {
+        const uint32_t here = GetCurrentThreadId();
+        const uint32_t render = g_renderThread.load(std::memory_order_acquire);
+        if (here == render) {
+            Log::info(kLog, "messages and frames share thread {}", here);
+        } else {
+            Log::warn(kLog, "messages run on thread {}, frames on thread {}", here, render);
+        }
+    }
+
+    if (g_titlePending.exchange(false, std::memory_order_acq_rel)) {
+        std::wstring title;
+        {
+            const std::lock_guard<std::mutex> guard(g_titleMutex);
+            title.swap(g_pendingTitle);
+        }
+        if (!title.empty()) SetWindowTextW(window, title.c_str());
+    }
+
     const bool capturing = captureInput();
 
+    try {
+        return dispatch(window, message, wParam, lParam, capturing);
+    } catch (const std::exception& error) {
+        Log::error(kLog, "input handler threw: {}", error.what());
+    } catch (...) {
+        Log::error(kLog, "input handler threw");
+    }
+
+    return CallWindowProcW(g_originalProc, window, message, wParam, lParam);
+}
+
+LRESULT WindowHook::dispatch(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+                             bool capturing) {
     switch (message) {
         case WM_MOUSEMOVE: {
             g_mouse = {static_cast<float>(GET_X_LPARAM(lParam)),
@@ -267,10 +332,27 @@ LRESULT CALLBACK WindowHook::wndProc(HWND window, UINT message, WPARAM wParam, L
             std::memset(g_keys, 0, sizeof(g_keys));
             break;
 
+        case WM_CLOSE:
+        case WM_DESTROY: {
+            GameClosingEvent closing;
+            events().emit(closing);
+            break;
+        }
+
+        case WM_ENTERSIZEMOVE:
+        case WM_EXITSIZEMOVE: {
+            WindowDragEvent event;
+            event.dragging = message == WM_ENTERSIZEMOVE;
+            events().emit(event);
+            break;
+        }
+
         case WM_SIZE: {
             SwapchainResizeEvent event;
             event.width = static_cast<uint32_t>(LOWORD(lParam));
             event.height = static_cast<uint32_t>(HIWORD(lParam));
+            event.fromWindow = true;
+            Log::debug(kLog, "WM_SIZE {}x{}", event.width, event.height);
             events().emit(event);
             break;
         }

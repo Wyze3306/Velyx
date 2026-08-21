@@ -19,9 +19,6 @@ public:
     using PresentCallback = std::function<void(IDXGISwapChain*)>;
     static void setPresentCallback(PresentCallback callback);
 
-    using ResizeCallback = std::function<void(unsigned width, unsigned height)>;
-    static void setResizeCallback(ResizeCallback callback);
-
     static bool presenting();
 
 private:

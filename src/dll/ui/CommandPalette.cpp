@@ -44,7 +44,9 @@ CommandPalette::CommandPalette()
     keybind() = config().paletteKey;
 
     settings.header("Comportement");
-    settings.toggle("closeAfterRun", "Fermer après exécution", true);
+    settings.toggle("closeAfterRun", "Fermer après une action", true);
+    settings.toggle("closeAfterToggle", "Fermer après un changement d'état", false);
+    settings.toggle("showState", "Afficher une pastille d'état", true);
     settings.toggle("searchSettings", "Inclure les réglages", true);
     settings.toggle("searchProfiles", "Inclure les profils et thèmes", true);
 
@@ -64,6 +66,7 @@ void CommandPalette::registerCommand(std::string title, std::string subtitle,
 
 void CommandPalette::onEnable() {
     query_.clear();
+    resultsValid_ = false;
     highlighted_ = 0;
     open_.set(0.f);
     open_.to(1.f);
@@ -123,12 +126,27 @@ std::vector<CommandPalette::Entry> CommandPalette::matches() const {
 
     for (const auto& module : modules().all()) {
         Module* raw = module.get();
+
+        // The interface modules are closed whenever the palette is the thing on
+        // screen, so reporting their state would always read "off" and mean nothing.
+        // They get an action label instead.
+        const bool isInterface = raw->id() == "clickgui" || raw->id() == "hud_editor" ||
+                                 raw->id() == "command_palette" || raw->id() == "onboarding";
+
         Entry entry;
         entry.title = raw->name();
-        entry.subtitle = raw->enabled() ? "Activé — appuyez pour désactiver"
-                                        : "Désactivé — appuyez pour activer";
+        entry.subtitle = isInterface ? raw->description() : std::string{};
         entry.category = categoryLabel(raw->category());
-        entry.action = [raw] { raw->toggle(); };
+        entry.module = raw;
+        entry.interfaceModule = isInterface;
+        entry.keepOpen = !isInterface;
+        entry.action = [raw, isInterface] {
+            if (isInterface) {
+                modules().requestEnabled(raw, true);
+            } else {
+                modules().requestEnabled(raw, !raw->enabled());
+            }
+        };
         entries.push_back(std::move(entry));
     }
 
@@ -138,6 +156,7 @@ std::vector<CommandPalette::Entry> CommandPalette::matches() const {
             entry.title = "Profil : " + name;
             entry.subtitle = "Basculer vers ce profil";
             entry.category = "Profil";
+            entry.keepOpen = true;
             entry.action = [name] {
                 profiles().switchTo(name);
                 config().activeProfile = name;
@@ -151,6 +170,7 @@ std::vector<CommandPalette::Entry> CommandPalette::matches() const {
             entry.title = "Thème : " + name;
             entry.subtitle = "Appliquer ce thème";
             entry.category = "Thème";
+            entry.keepOpen = true;
             entry.action = [name] { ThemeManager::get().apply(name); };
             entries.push_back(std::move(entry));
         }
@@ -195,11 +215,34 @@ std::vector<CommandPalette::Entry> CommandPalette::matches() const {
     return entries;
 }
 
-void CommandPalette::run(const Entry& entry) {
-    if (entry.action) entry.action();
-    if (settings.value<bool>("closeAfterRun", true)) setEnabled(false);
+const std::vector<CommandPalette::Entry>& CommandPalette::results() {
+    if (!resultsValid_ || resultsQuery_ != query_) {
+        results_ = matches();
+        resultsQuery_ = query_;
+        resultsValid_ = true;
+    }
+
+    // Only the state each row reports is refreshed; the order stays as the reader
+    // last saw it, which is the whole point of caching it.
+    for (Entry& entry : results_) {
+        if (!entry.module || entry.interfaceModule) continue;
+        entry.subtitle = entry.module->enabled() ? "Activé — appuyez pour désactiver"
+                                                 : "Désactivé — appuyez pour activer";
+    }
+
+    return results_;
 }
 
+void CommandPalette::run(const Entry& entry) {
+    if (entry.action) entry.action();
+
+    const bool close = entry.keepOpen ? settings.value<bool>("closeAfterToggle", false)
+                                      : settings.value<bool>("closeAfterRun", true);
+    if (close) modules().requestEnabled(this, false);
+}
+
+// Cancelling stays here, synchronously: it is what keeps the keystroke out of the
+// game. Only the state the renderer reads is deferred.
 void CommandPalette::onKey(KeyEvent& event) {
     if (!event.down) {
         event.cancel();
@@ -207,34 +250,9 @@ void CommandPalette::onKey(KeyEvent& event) {
     }
     if (event.key == keybind().key && event.ctrl == keybind().ctrl) return;
 
-    const auto results = matches();
-
-    switch (event.key) {
-        case VK_ESCAPE:
-            setEnabled(false);
-            break;
-        case VK_UP:
-            highlighted_ = std::max(0, highlighted_ - 1);
-            break;
-        case VK_DOWN:
-            highlighted_ = std::min(static_cast<int>(results.size()) - 1, highlighted_ + 1);
-            break;
-        case VK_RETURN:
-            if (highlighted_ >= 0 && highlighted_ < static_cast<int>(results.size())) {
-                run(results[static_cast<size_t>(highlighted_)]);
-            }
-            break;
-        case VK_BACK:
-            if (!query_.empty()) {
-                do {
-                    query_.pop_back();
-                } while (!query_.empty() &&
-                         (static_cast<unsigned char>(query_.back()) & 0xC0) == 0x80);
-                highlighted_ = 0;
-            }
-            break;
-        default:
-            break;
+    {
+        const std::lock_guard<std::mutex> guard(inputMutex_);
+        if (queuedKeys_.size() < kMaxQueuedInput) queuedKeys_.push_back(event);
     }
 
     event.cancel();
@@ -242,14 +260,61 @@ void CommandPalette::onKey(KeyEvent& event) {
 
 void CommandPalette::onChar(CharEvent& event) {
     if (event.codepoint >= 32 && event.codepoint != 127) {
-        if (event.codepoint < 0x80) {
-            query_.push_back(static_cast<char>(event.codepoint));
+        const std::lock_guard<std::mutex> guard(inputMutex_);
+        if (queuedChars_.size() < kMaxQueuedInput) queuedChars_.push_back(event.codepoint);
+    }
+    event.cancel();
+}
+
+void CommandPalette::processInput() {
+    std::vector<KeyEvent> keys;
+    std::vector<unsigned int> characters;
+    {
+        const std::lock_guard<std::mutex> guard(inputMutex_);
+        keys.swap(queuedKeys_);
+        characters.swap(queuedChars_);
+    }
+
+    for (const KeyEvent& event : keys) {
+        const auto& results = this->results();
+
+        switch (event.key) {
+            case VK_ESCAPE:
+                modules().requestEnabled(this, false);
+                break;
+            case VK_UP:
+                highlighted_ = std::max(0, highlighted_ - 1);
+                break;
+            case VK_DOWN:
+                highlighted_ = std::min(static_cast<int>(results.size()) - 1, highlighted_ + 1);
+                break;
+            case VK_RETURN:
+                if (highlighted_ >= 0 && highlighted_ < static_cast<int>(results.size())) {
+                    run(results[static_cast<size_t>(highlighted_)]);
+                }
+                break;
+            case VK_BACK:
+                if (!query_.empty()) {
+                    do {
+                        query_.pop_back();
+                    } while (!query_.empty() &&
+                             (static_cast<unsigned char>(query_.back()) & 0xC0) == 0x80);
+                    highlighted_ = 0;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    for (const unsigned int codepoint : characters) {
+        if (codepoint < 0x80) {
+            query_.push_back(static_cast<char>(codepoint));
         } else {
-            query_ += strings::toUtf8(std::wstring(1, static_cast<wchar_t>(event.codepoint)));
+            query_ += strings::toUtf8(std::wstring(1, static_cast<wchar_t>(codepoint)));
         }
         highlighted_ = 0;
     }
-    event.cancel();
 }
 
 void CommandPalette::onMouse(MouseEvent& event) {
@@ -258,6 +323,8 @@ void CommandPalette::onMouse(MouseEvent& event) {
 }
 
 void CommandPalette::onRender(RenderTopEvent& event) {
+    processInput();
+
     Renderer& renderer = *event.renderer;
     const auto& active = theme();
 
@@ -273,7 +340,7 @@ void CommandPalette::onRender(RenderTopEvent& event) {
     renderer.fillRect(Rect::fromSize(0.f, 0.f, event.screenSize.x, event.screenSize.y),
                       active.backgroundDeep.withAlpha(0.5f * appear));
 
-    const auto results = matches();
+    const auto& results = this->results();
 
     const float width = std::min(kWidth, event.screenSize.x - 60.f);
     const float height = kInputHeight + static_cast<float>(results.size()) * kRowHeight +
@@ -321,9 +388,10 @@ void CommandPalette::onRender(RenderTopEvent& event) {
         y += kRowHeight;
 
         const UiId id("palette_row", static_cast<int>(i));
-        const bool isHighlighted = static_cast<int>(i) == highlighted_;
-
+        const bool pressed = gui.hoverAndClick(id, row);
         if (gui.hovered(id)) highlighted_ = static_cast<int>(i);
+
+        const bool isHighlighted = static_cast<int>(i) == highlighted_;
 
         const float glow = gui.animate(UiId("palette_glow", static_cast<int>(i)), isHighlighted, 22.f);
         if (glow > 0.01f) {
@@ -337,10 +405,30 @@ void CommandPalette::onRender(RenderTopEvent& event) {
                                       row.right - 120.f, row.bottom - 4.f},
                  active.textMuted, 11.f, FontWeight::Regular);
 
-        gui.text(entry.category, Rect{row.right - 110.f, row.top, row.right - 16.f, row.bottom},
+        // A state written only in grey prose at the end of a subtitle is not readable
+        // at a glance, which is the one thing a palette row has to be.
+        float categoryRight = row.right - 16.f;
+        if (entry.module && !entry.interfaceModule && settings.value<bool>("showState", true)) {
+            const bool on = entry.module->enabled();
+            const Rect pill{row.right - 58.f, row.center().y - 9.f, row.right - 16.f,
+                            row.center().y + 9.f};
+
+            renderer.fillRounded(pill, on ? active.liveAccent().fade(0.22f)
+                                          : active.surface.fade(0.6f),
+                                 pill.height() * 0.5f);
+            renderer.strokeRounded(pill, on ? active.liveAccent().fade(0.7f)
+                                            : active.border.fade(0.7f),
+                                   pill.height() * 0.5f, 1.f);
+            gui.text(on ? "ON" : "OFF", pill, on ? active.liveAccent() : active.textMuted, 10.5f,
+                     FontWeight::SemiBold, TextAlign::Center);
+
+            categoryRight = pill.left - 10.f;
+        }
+
+        gui.text(entry.category, Rect{categoryRight - 94.f, row.top, categoryRight, row.bottom},
                  active.liveAccent().fade(0.8f), 11.f, FontWeight::Medium, TextAlign::Right);
 
-        if (gui.hovered(id) && gui.clicked()) run(entry);
+        if (pressed) run(entry);
     }
 
     renderer.popOpacity();

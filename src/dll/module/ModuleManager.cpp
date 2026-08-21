@@ -28,11 +28,21 @@ void ModuleManager::initialize() {
         if (dynamic_cast<HudModule*>(module.get())) ++hudCount;
     }
 
+    // Nothing dispatched keybinds before this: handleKey() existed but was never
+    // reached, so no module could be toggled from the keyboard. Low priority keeps
+    // the open interface first — it cancels the keys it consumes.
+    events().on<KeyEvent>([this](KeyEvent& event) { handleKey(event); }, EventPriority::Low,
+                          this);
+
     Log::info(kLog, "registered {} modules ({} HUD elements)", modules_.size(), hudCount);
 }
 
 void ModuleManager::shutdown() {
     disableAll();
+    {
+        const std::lock_guard<std::mutex> guard(pendingMutex_);
+        pendingToggles_.clear();
+    }
     modules_.clear();
     initialised_ = false;
 }
@@ -139,18 +149,40 @@ void ModuleManager::handleKey(const KeyEvent& event) {
 
         switch (bind.mode) {
             case Keybind::Mode::Toggle:
-                if (event.down && !event.repeat) module->toggle();
+                if (event.down && !event.repeat) {
+                    requestEnabled(module.get(), !module->enabled());
+                }
                 break;
             case Keybind::Mode::Hold:
-                module->setEnabled(event.down);
+                requestEnabled(module.get(), event.down);
                 break;
             case Keybind::Mode::Once:
                 if (event.down && !event.repeat) {
-                    module->setEnabled(true);
-                    module->setEnabled(false);
+                    requestEnabled(module.get(), true);
+                    requestEnabled(module.get(), false);
                 }
                 break;
         }
+    }
+}
+
+void ModuleManager::requestEnabled(Module* module, bool enabled) {
+    if (!module) return;
+    const std::lock_guard<std::mutex> guard(pendingMutex_);
+    pendingToggles_.emplace_back(module, enabled);
+}
+
+void ModuleManager::applyPendingToggles() {
+    std::vector<std::pair<Module*, bool>> pending;
+    {
+        const std::lock_guard<std::mutex> guard(pendingMutex_);
+        if (pendingToggles_.empty()) return;
+        pending.swap(pendingToggles_);
+    }
+
+    for (const auto& [module, enabled] : pending) {
+        if (safeMode_ && !module->essential() && enabled) continue;
+        module->setEnabled(enabled);
     }
 }
 

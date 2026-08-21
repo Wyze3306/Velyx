@@ -197,6 +197,12 @@ nlohmann::json ProfileManager::serializeCurrent() const {
 void ProfileManager::saveCurrent() {
     if (current_.name.empty()) return;
 
+    // A switch disables every module before loading the new set, and each toggle runs
+    // onDisable — where the interface saves the current profile. current_ is already
+    // the profile being switched to by then, so that save wrote the half-applied
+    // state over it and emptied it. Nothing is persisted mid-switch.
+    if (switching_) return;
+
     current_.modifiedAt = nowMs();
     current_.theme = theme().name;
 
@@ -212,27 +218,36 @@ void ProfileManager::applyDocument(const nlohmann::json& document) {
 }
 
 bool ProfileManager::switchTo(const std::string& name, bool automatic) {
-    const Profile* target = nullptr;
+    const Profile* found = nullptr;
     for (const Profile& profile : profiles_) {
-        if (profile.name == name) target = &profile;
+        if (profile.name == name) found = &profile;
     }
 
-    if (!target) {
+    if (!found) {
         Log::warn(kLog, "unknown profile: {}", name);
         return false;
     }
     if (current_.name == name) return true;
 
+    // Taken by value: everything below reaches back into this manager through
+    // onDisable and onEnable, and anything that touches profiles_ there would leave
+    // a pointer into it dangling.
+    const Profile target = *found;
+
     if (!current_.name.empty()) saveCurrent();
 
     const std::string previous = current_.name;
 
+    switching_ = true;
+
     modules().disableAll();
 
-    current_ = *target;
+    current_ = target;
     applyDocument(readJson(fileFor(name)));
 
     ThemeManager::get().apply(current_.theme);
+
+    switching_ = false;
 
     ProfileChangeEvent event;
     event.previous = previous;

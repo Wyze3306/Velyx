@@ -40,14 +40,9 @@ Ui& Ui::get() {
     return instance;
 }
 
-void Ui::beginFrame(Renderer& renderer, float deltaSeconds) {
-    renderer_ = &renderer;
-    delta_ = deltaSeconds;
-    hot_ = UiId{};
-}
+void Ui::beginOverlayFrame() { drainInput(); }
 
-void Ui::endFrame() {
-
+void Ui::endOverlayFrame() {
     clicked_ = false;
     released_ = false;
     wheel_ = 0.f;
@@ -56,46 +51,83 @@ void Ui::endFrame() {
     pendingKeys_.clear();
 
     if (!mouseDown_) active_ = UiId{};
-
-    renderer_ = nullptr;
 }
 
+void Ui::beginFrame(Renderer& renderer, float deltaSeconds) {
+    renderer_ = &renderer;
+    delta_ = deltaSeconds;
+    hot_ = UiId{};
+}
+
+void Ui::endFrame() { renderer_ = nullptr; }
+
+// The window procedure runs on the game's message thread while the widgets are
+// walked from the render thread inside Present, so input is queued here and
+// applied at the top of a frame instead. That keeps the per-frame state owned by
+// one thread, and it is also what makes a click reliable: applied at the frame
+// boundary, it stays true for the whole frame that tests it, where a click landing
+// mid-frame used to be wiped by endFrame() before any widget saw it.
 void Ui::feedMouse(const MouseEvent& event) {
-    switch (event.action) {
-        case MouseAction::Move:
-            mouseDelta_ = event.position - mouse_;
-            mouse_ = event.position;
-            break;
-        case MouseAction::Press:
-            if (event.button == MouseButton::Left) {
-                mouseDown_ = true;
-                clicked_ = true;
-            }
-            break;
-        case MouseAction::Release:
-            if (event.button == MouseButton::Left) {
-                mouseDown_ = false;
-                released_ = true;
-            }
-            break;
-        case MouseAction::Wheel:
-            wheel_ += event.wheelDelta;
-            break;
-    }
+    const std::lock_guard<std::mutex> guard(inputMutex_);
+    if (queuedMouse_.size() < kMaxQueuedInput) queuedMouse_.push_back(event);
 }
 
 void Ui::feedKey(const KeyEvent& event) {
     if (!event.down) return;
-    pendingKeys_.push_back(event.key);
+    const std::lock_guard<std::mutex> guard(inputMutex_);
+    if (queuedKeys_.size() < kMaxQueuedInput) queuedKeys_.push_back(event);
 }
 
 void Ui::feedChar(const CharEvent& event) {
     if (event.codepoint < 32 || event.codepoint == 127) return;
+    const std::lock_guard<std::mutex> guard(inputMutex_);
+    if (queuedChars_.size() < kMaxQueuedInput) queuedChars_.push_back(event.codepoint);
+}
 
-    if (event.codepoint < 0x80) {
-        pendingChars_.push_back(static_cast<char>(event.codepoint));
-    } else {
-        pendingChars_ += strings::toUtf8(std::wstring(1, static_cast<wchar_t>(event.codepoint)));
+void Ui::drainInput() {
+    std::vector<MouseEvent> mouse;
+    std::vector<KeyEvent> keys;
+    std::vector<unsigned int> characters;
+
+    {
+        const std::lock_guard<std::mutex> guard(inputMutex_);
+        mouse.swap(queuedMouse_);
+        keys.swap(queuedKeys_);
+        characters.swap(queuedChars_);
+    }
+
+    for (const MouseEvent& event : mouse) {
+        switch (event.action) {
+            case MouseAction::Move:
+                mouseDelta_ = mouseDelta_ + (event.position - mouse_);
+                mouse_ = event.position;
+                break;
+            case MouseAction::Press:
+                if (event.button == MouseButton::Left) {
+                    mouseDown_ = true;
+                    clicked_ = true;
+                }
+                break;
+            case MouseAction::Release:
+                if (event.button == MouseButton::Left) {
+                    mouseDown_ = false;
+                    released_ = true;
+                }
+                break;
+            case MouseAction::Wheel:
+                wheel_ += event.wheelDelta;
+                break;
+        }
+    }
+
+    for (const KeyEvent& event : keys) pendingKeys_.push_back(event.key);
+
+    for (const unsigned int codepoint : characters) {
+        if (codepoint < 0x80) {
+            pendingChars_.push_back(static_cast<char>(codepoint));
+        } else {
+            pendingChars_ += strings::toUtf8(std::wstring(1, static_cast<wchar_t>(codepoint)));
+        }
     }
 }
 

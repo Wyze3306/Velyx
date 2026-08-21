@@ -1,7 +1,9 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <json/json.hpp>
@@ -51,6 +53,12 @@ public:
 
     void handleKey(const KeyEvent& event);
 
+    // Keybinds arrive on the game's message thread, where onEnable/onDisable would
+    // run — profile writes included — while the render thread walks these same
+    // modules. The change is queued here and applied between frames instead.
+    void requestEnabled(Module* module, bool enabled);
+    void applyPendingToggles();
+
     void setSafeMode(bool safeMode);
     [[nodiscard]] bool safeMode() const { return safeMode_; }
 
@@ -65,6 +73,9 @@ private:
     std::vector<std::unique_ptr<Module>> modules_;
     bool safeMode_ = false;
     bool initialised_ = false;
+
+    std::mutex pendingMutex_;
+    std::vector<std::pair<Module*, bool>> pendingToggles_;
 };
 
 void registerBuiltInModules(ModuleManager& manager);

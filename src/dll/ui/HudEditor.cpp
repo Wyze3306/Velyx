@@ -79,22 +79,38 @@ std::vector<HudModule*> HudEditor::movingGroup() const {
 void HudEditor::onMouse(MouseEvent& event) {
     ui().feedMouse(event);
 
-    if (event.action == MouseAction::Press && event.button == MouseButton::Left) {
+    if (event.action == MouseAction::Press || event.action == MouseAction::Release) {
+        const std::lock_guard<std::mutex> guard(inputMutex_);
+        if (queuedMouse_.size() < kMaxQueuedInput) queuedMouse_.push_back(event);
+    }
 
-        auto huds = modules().huds();
-        for (auto it = huds.rbegin(); it != huds.rend(); ++it) {
-            HudModule* element = *it;
-            if (!element->enabled()) continue;
-            if (!element->bounds().contains(event.position)) continue;
+    event.cancel();
+}
 
-            selected_ = element;
-            dragged_ = element;
-            dragOffset_ = event.position - element->bounds().topLeft();
-            break;
-        }
-    } else if (event.action == MouseAction::Release && event.button == MouseButton::Left) {
-        if (dragged_) {
+void HudEditor::processInput() {
+    std::vector<MouseEvent> mouse;
+    {
+        const std::lock_guard<std::mutex> guard(inputMutex_);
+        if (queuedMouse_.empty()) return;
+        mouse.swap(queuedMouse_);
+    }
 
+    for (const MouseEvent& event : mouse) {
+        if (event.button != MouseButton::Left) continue;
+
+        if (event.action == MouseAction::Press) {
+            auto huds = modules().huds();
+            for (auto it = huds.rbegin(); it != huds.rend(); ++it) {
+                HudModule* element = *it;
+                if (!element->enabled()) continue;
+                if (!element->bounds().contains(event.position)) continue;
+
+                selected_ = element;
+                dragged_ = element;
+                dragOffset_ = event.position - element->bounds().topLeft();
+                break;
+            }
+        } else if (event.action == MouseAction::Release && dragged_) {
             for (HudModule* element : movingGroup()) {
                 element->reanchorToNearestEdge(Velyx::get().screenSize());
             }
@@ -102,15 +118,13 @@ void HudEditor::onMouse(MouseEvent& event) {
             guides_.clear();
         }
     }
-
-    event.cancel();
 }
 
 void HudEditor::onKey(KeyEvent& event) {
     if (event.key == keybind().key) return;
 
     if (event.down && event.key == VK_ESCAPE) {
-        setEnabled(false);
+        modules().requestEnabled(this, false);
         event.cancel();
         return;
     }
@@ -398,6 +412,8 @@ void HudEditor::drawBottomBar(Renderer& renderer, Vec2 screenSize) {
 }
 
 void HudEditor::onRender(RenderTopEvent& event) {
+    processInput();
+
     Renderer& renderer = *event.renderer;
     const auto& active = theme();
 

@@ -121,7 +121,7 @@ void ClickGui::onKey(KeyEvent& event) {
     if (event.key == keybind().key) return;
 
     if (event.down && event.key == VK_ESCAPE && !ui().capturingText()) {
-        setEnabled(false);
+        modules().requestEnabled(this, false);
         event.cancel();
         return;
     }
@@ -312,6 +312,7 @@ void ClickGui::drawSidebar(const Rect& rect) {
 
         const bool current = profile.name == profiles().current().name;
         const UiId id("profile_row", static_cast<int>(i));
+        const bool pressed = gui.hoverAndClick(id, row);
         const float hover = gui.animate(id, gui.hovered(id));
         const float on = gui.animate(UiId("profile_on", static_cast<int>(i)), current, 20.f);
 
@@ -336,7 +337,7 @@ void ClickGui::drawSidebar(const Rect& rect) {
         gui.text(hint, Rect{row.left + 26.f, row.top + 22.f, row.right - 10.f, row.bottom - 4.f},
                  active.textDim, 10.5f, FontWeight::Regular);
 
-        if (gui.hovered(id) && gui.clicked() && !current) {
+        if (pressed && !current) {
             profiles().switchTo(profile.name);
             config().activeProfile = profile.name;
             config().save();
@@ -354,6 +355,7 @@ void ClickGui::drawSidebar(const Rect& rect) {
 
         const bool current = static_cast<int>(page_) == item.page;
         const UiId id("page_row", item.page);
+        const bool pressed = gui.hoverAndClick(id, row);
         const float hover = gui.animate(id, gui.hovered(id));
         const float on = gui.animate(UiId("page_on", item.page), current, 20.f);
 
@@ -367,7 +369,7 @@ void ClickGui::drawSidebar(const Rect& rect) {
                  lerp(lerp(active.textDim, active.textMuted, hover), active.liveAccent(), on),
                  12.5f, current ? FontWeight::SemiBold : FontWeight::Medium);
 
-        if (gui.hovered(id) && gui.clicked()) {
+        if (pressed) {
             page_ = static_cast<Page>(item.page);
             showSettings_ = false;
             search_.clear();
@@ -749,6 +751,7 @@ void ClickGui::drawThemesPage(const Rect& rect) {
 
         const UiId id("theme_card", static_cast<int>(i));
         const bool isCurrent = entry.name == active.name;
+        const bool pressed = gui.hoverAndClick(id, card);
         const float hover = gui.animate(id, gui.hovered(id));
 
         gui.renderer().fillRounded(card, entry.background, entry.panelRadius);
@@ -771,7 +774,7 @@ void ClickGui::drawThemesPage(const Rect& rect) {
                                   card.bottom - 12.f},
                  entry.text, 13.f, FontWeight::SemiBold);
 
-        if (gui.hovered(id) && gui.clicked()) {
+        if (pressed) {
             manager.apply(entry.name);
             profiles().mutableCurrent().theme = entry.name;
         }
@@ -851,6 +854,7 @@ void ClickGui::drawProfilesPage(const Rect& rect) {
 
         const UiId id("profile_row", static_cast<int>(i));
         const bool isCurrent = profile.name == manager.current().name;
+        const bool pressed = gui.hoverAndClick(id, row);
         const float hover = gui.animate(id, gui.hovered(id));
 
         gui.renderer().fillRounded(row,
@@ -871,7 +875,7 @@ void ClickGui::drawProfilesPage(const Rect& rect) {
         gui.text(subtitle, Rect{row.left + 14.f, row.top + 26.f, row.right - 20.f, row.bottom - 4.f},
                  active.textMuted, 11.f, FontWeight::Regular);
 
-        if (gui.hovered(id) && gui.clicked() && !isCurrent) {
+        if (pressed && !isCurrent) {
             manager.switchTo(profile.name);
             config().activeProfile = profile.name;
             config().save();

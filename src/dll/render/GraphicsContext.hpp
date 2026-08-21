@@ -7,6 +7,7 @@
 #include <dwrite_3.h>
 #include <dxgi1_4.h>
 
+#include <atomic>
 #include <mutex>
 #include <vector>
 
@@ -24,6 +25,20 @@ public:
     void setCommandQueue(ID3D12CommandQueue* queue);
 
     bool attach(IDXGISwapChain* swapChain);
+
+    // True once after the swapchain changed size without anyone announcing it.
+    [[nodiscard]] bool takeResized();
+
+    // Drops every reference to the current back buffers, at once. The window changing
+    // size means the game is about to destroy its swapchain, and it must not find our
+    // references still on its buffers when it does.
+    void releaseForResize();
+
+    // Set around an interactive border drag: nothing is rebuilt while it holds.
+    void setWindowMoving(bool moving);
+
+    // Runs the release that releaseForResize() asked for, on the render thread.
+    void applyPendingRelease();
 
     void releaseTargets();
 
@@ -54,6 +69,13 @@ private:
 
     std::recursive_mutex mutex_;
 
+    // Set when attach() rebuilt the targets for a size it was never told about, so
+    // the client can relayout for it. Cleared by takeResized().
+    bool resized_ = false;
+
+    // Held from beginFrame() to endFrame(): see the note in beginFrame().
+    std::unique_lock<std::recursive_mutex> frameLock_;
+
     IDXGISwapChain* swapChain_ = nullptr;
     ComPtr<IDXGISwapChain3> swapChain3_;
     ComPtr<ID3D12CommandQueue> commandQueue_;
@@ -67,6 +89,32 @@ private:
     ComPtr<ID2D1Device> d2dDevice_;
     ComPtr<ID2D1DeviceContext> d2dContext_;
     ComPtr<IDWriteFactory5> dwriteFactory_;
+
+    // The back buffer each target was built on, kept only to notice when the swapchain
+    // hands out different ones: see attach().
+    std::vector<void*> wrappedFrom_;
+
+    // The client size the last frame saw. Any disagreement with it means the buffers
+    // we hold no longer describe the window, and the overlay stops drawing at once.
+    unsigned lastClientWidth_ = 0;
+    unsigned lastClientHeight_ = 0;
+
+    // When the window last changed, in milliseconds. Rebuilding is gated on this
+    // rather than on a frame count: frames only tick while the game presents, so a
+    // handful of them can pass inside a single drag. See attach().
+    std::atomic<uint64_t> lastChangeMs_{0};
+    std::atomic<bool> windowMoving_{false};
+
+    // Set from the window procedure, acted on by the render thread: see
+    // releaseForResize().
+    std::atomic<bool> releasePending_{false};
+
+    // Stamps lastChangeMs_. Called from whichever thread noticed the change.
+    void noteWindowChanged();
+
+    // Blocks until the queue has finished with what it was given, so wrapped back
+    // buffers are never freed while the GPU is still reading them.
+    bool waitForGpu();
 
     struct FrameTarget {
         ComPtr<ID3D11Resource> wrapped;

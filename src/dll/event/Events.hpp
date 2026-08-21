@@ -40,9 +40,26 @@ struct Render3DEvent : Event {
 struct SwapchainResizeEvent : Event {
     uint32_t width = 0;
     uint32_t height = 0;
+
+    // True only for the window telling us it changed. The render thread emits this
+    // event again once it has rebuilt for the new size, so that everything can lay
+    // itself out — and a rebuild must not be mistaken for another window change, or
+    // the two feed each other and the overlay never stops tearing itself down.
+    bool fromWindow = false;
+};
+
+// The bookends of an interactive border drag. Between them the window size is in
+// motion and nothing may be rebuilt from the swapchain.
+struct WindowDragEvent : Event {
+    bool dragging = false;
 };
 
 struct DeviceLostEvent : Event {};
+
+// The window closing is the only warning a normal exit gives: at DLL_PROCESS_DETACH
+// the process is already going and Velyx deliberately does nothing there, so without
+// this every clean exit would be counted as a crash.
+struct GameClosingEvent : Event {};
 
 struct KeyEvent : Cancellable {
     int key = 0;
