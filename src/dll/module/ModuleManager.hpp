@@ -60,7 +60,7 @@ public:
     };
     [[nodiscard]] std::vector<SearchHit> search(std::string_view query, size_t limit = 24) const;
 
-    void handleKey(const KeyEvent& event);
+    void handleKey(KeyEvent& event);
 
     // A key that does something other than toggle a module — the menu's search key is
     // the only one so far. The bind is read through the pointer at every keystroke, so

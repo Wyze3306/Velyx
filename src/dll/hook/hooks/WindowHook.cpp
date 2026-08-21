@@ -2,6 +2,7 @@
 
 #include <windowsx.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <mutex>
@@ -30,6 +31,7 @@ std::atomic<bool> g_threadingReported{false};
 std::mutex g_titleMutex;
 std::wstring g_pendingTitle;
 std::atomic<bool> g_titlePending{false};
+std::atomic<bool> g_releasePending{false};
 Vec2 g_mouse;
 bool g_keys[256]{};
 
@@ -111,6 +113,49 @@ void WindowHook::attach(HWND window) {
 
 HWND WindowHook::window() { return g_window; }
 
+namespace {
+
+// Straight to the game's own procedure: dispatch() swallows keys while the client
+// is capturing, which is the very thing being worked around.
+void releaseHeldKeys(HWND window) {
+    if (!window || !g_originalProc) return;
+
+    struct ButtonMessage {
+        int key;
+        UINT message;
+        WPARAM wParam;
+    };
+    constexpr ButtonMessage kButtons[]{
+        {VK_LBUTTON, WM_LBUTTONUP, 0},
+        {VK_RBUTTON, WM_RBUTTONUP, 0},
+        {VK_MBUTTON, WM_MBUTTONUP, 0},
+        {VK_XBUTTON1, WM_XBUTTONUP, MAKEWPARAM(0, XBUTTON1)},
+        {VK_XBUTTON2, WM_XBUTTONUP, MAKEWPARAM(0, XBUTTON2)},
+    };
+
+    for (int key = 0; key < 256; ++key) {
+        if (!g_keys[key]) continue;
+        g_keys[key] = false;
+
+        const auto button = std::ranges::find_if(
+            kButtons, [key](const ButtonMessage& entry) { return entry.key == key; });
+
+        if (button != std::end(kButtons)) {
+            CallWindowProcW(g_originalProc, window, button->message, button->wParam, 0);
+            continue;
+        }
+
+        // Bit 31 says released, bit 30 that it was down, and the scan code is what a
+        // real key-up carries.
+        const LPARAM info = static_cast<LPARAM>(0xC0000001u) |
+                            (static_cast<LPARAM>(MapVirtualKeyW(static_cast<UINT>(key),
+                                                                MAPVK_VK_TO_VSC)) << 16);
+        CallWindowProcW(g_originalProc, window, WM_KEYUP, static_cast<WPARAM>(key), info);
+    }
+}
+
+}
+
 void WindowHook::setCaptureInput(bool capture) {
     const bool previous = g_capture.exchange(capture);
     if (previous == capture) return;
@@ -119,6 +164,13 @@ void WindowHook::setCaptureInput(bool capture) {
 
         ClipCursor(nullptr);
         while (ShowCursor(TRUE) < 0) {}
+
+        // Whatever was held when the client took over never gets its key-up: the
+        // procedure swallows those from here on, and the game is left sprinting on a
+        // Ctrl that is no longer down. Opening the menu with Ctrl+K did exactly that.
+        // The releases are handed to the window's own thread, like the title.
+        g_releasePending.store(true, std::memory_order_release);
+        if (g_window) PostMessageW(g_window, WM_NULL, 0, 0);
     } else {
         while (ShowCursor(FALSE) >= 0) {}
     }
@@ -194,6 +246,8 @@ LRESULT CALLBACK WindowHook::wndProc(HWND window, UINT message, WPARAM wParam, L
             Log::warn(kLog, "messages run on thread {}, frames on thread {}", here, render);
         }
     }
+
+    if (g_releasePending.exchange(false, std::memory_order_acq_rel)) releaseHeldKeys(window);
 
     if (g_titlePending.exchange(false, std::memory_order_acq_rel)) {
         std::wstring title;

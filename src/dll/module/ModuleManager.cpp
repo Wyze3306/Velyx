@@ -156,7 +156,12 @@ bool ModuleManager::anyInterfaceOpen() const {
     });
 }
 
-void ModuleManager::handleKey(const KeyEvent& event) {
+void ModuleManager::handleKey(KeyEvent& event) {
+    // A key the client answers to is the client's. Left uncancelled it also reaches
+    // the game, which is how Ctrl+K opened the menu and made the game act on the
+    // keystroke behind it.
+    bool consumed = false;
+
     if (event.down && !event.repeat) {
         for (const Shortcut& shortcut : shortcuts_) {
             const Keybind& bind = *shortcut.bind;
@@ -166,6 +171,7 @@ void ModuleManager::handleKey(const KeyEvent& event) {
             }
 
             shortcut.action();
+            consumed = true;
         }
     }
 
@@ -176,6 +182,8 @@ void ModuleManager::handleKey(const KeyEvent& event) {
         if (bind.ctrl != event.ctrl || bind.shift != event.shift || bind.alt != event.alt) continue;
 
         if (safeMode_ && !module->essential()) continue;
+
+        consumed = true;
 
         switch (bind.mode) {
             case Keybind::Mode::Toggle:
@@ -194,6 +202,8 @@ void ModuleManager::handleKey(const KeyEvent& event) {
                 break;
         }
     }
+
+    if (consumed) event.cancel();
 }
 
 void ModuleManager::addShortcut(const Keybind* bind, std::function<void()> action) {

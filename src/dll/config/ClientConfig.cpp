@@ -42,8 +42,13 @@ void ClientConfig::load() {
         return;
     }
 
+    // "language" existed long before it did anything, and every configuration written
+    // by an older build carries the "fr" it was born with. Only a file that knows
+    // about the setting is allowed to speak for it.
+    const int formatVersion = json.value("formatVersion", 0);
+
     activeProfile = json.value("activeProfile", activeProfile);
-    language = json.value("language", language);
+    if (formatVersion >= 1) language = json.value("language", language);
     updateChannel = json.value("updateChannel", updateChannel);
     theme = json.value("theme", theme);
 
@@ -74,6 +79,7 @@ void ClientConfig::load() {
 
 void ClientConfig::save() const {
     nlohmann::json json;
+    json["formatVersion"] = 1;
     json["activeProfile"] = activeProfile;
     json["language"] = language;
     json["updateChannel"] = updateChannel;
