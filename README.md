@@ -9,6 +9,8 @@ that runs several game instances side by side, each on its own Microsoft account
 [![licence](https://img.shields.io/badge/licence-GPL--3.0-3DDC84)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-0B1F17)](CMakeLists.txt)
 
+**[wyze3306.github.io/Velyx](https://wyze3306.github.io/Velyx/)**
+
 </div>
 
 Velyx ships as a single `Velyx.exe`. The client, the fonts and the signature

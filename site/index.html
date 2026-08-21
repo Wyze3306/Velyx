@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Velyx — client utilitaire pour Minecraft Bedrock</title>
+<meta name="description" content="Velyx est un client utilitaire pour Minecraft Bedrock : un menu avec recherche, un éditeur de HUD, des profils qui suivent le serveur, et plusieurs comptes qui tournent en même temps. Aucun module ne joue à votre place.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Velyx — client utilitaire pour Minecraft Bedrock">
+<meta property="og:description" content="Un menu, un HUD que vous placez vous-même, des profils, et plusieurs comptes en même temps. Aucun module ne joue à votre place.">
+<meta property="og:image" content="https://wyze3306.github.io/Velyx/assets/velyx-icon.png">
+<meta property="og:url" content="https://wyze3306.github.io/Velyx/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0E0F11">
+<link rel="icon" href="assets/velyx-icon.png" type="image/png">
+<link rel="apple-touch-icon" href="assets/velyx-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body id="top">
+
+<a class="skip" href="#main" data-en="Skip to content">Aller au contenu</a>
+
+<header class="hdr">
+  <div class="hdr-in">
+    <a class="brand" href="#top">
+      <img class="brand-mark" src="assets/velyx-icon.png" alt="" width="26" height="26">
+      <span class="brand-name">VELYX</span>
+    </a>
+
+    <nav class="nav" aria-label="Sections">
+      <a href="#menu" data-en="The menu">Le menu</a>
+      <a href="#hud" data-en="The HUD">Le HUD</a>
+      <a href="#launcher" data-en="Accounts">Les comptes</a>
+      <a href="#modules" data-en="Modules">Les modules</a>
+      <a href="#install" data-en="Install">Installer</a>
+    </nav>
+
+    <div class="hdr-end">
+      <div class="seg" role="group" aria-label="Langue / Language">
+        <button type="button" class="seg-btn is-on" data-lang="fr" aria-pressed="true">FR</button>
+        <button type="button" class="seg-btn" data-lang="en" aria-pressed="false">EN</button>
+      </div>
+      <a class="btn btn-ghost hdr-gh" href="https://github.com/Wyze3306/Velyx" rel="noopener">GitHub</a>
+      <a class="btn btn-primary" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener" data-en="Download">Télécharger</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ─────────────────────────── HERO ─────────────────────────── -->
+  <section class="hero">
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="wrap hero-in">
+
+      <div class="hero-say">
+        <p class="eyebrow" data-en="Utility client · Minecraft Bedrock">Client utilitaire · Minecraft Bedrock</p>
+        <h1 data-en="A client that doesn&rsquo;t play the game for you.">Un client qui ne joue pas à votre place.</h1>
+        <p class="lede" data-en="Velyx gives you a menu, a HUD you arrange yourself, profiles that follow the server you join, and several accounts running side by side. One file. Nothing to install.">Velyx ajoute un menu, un HUD que vous placez vous-même, des profils qui suivent le serveur, et plusieurs comptes qui tournent en même temps. Un seul fichier. Rien à installer.</p>
+
+        <div class="cta">
+          <a class="btn btn-primary btn-lg" id="dl" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v9M4.4 7.6 8 11.2l3.6-3.6M3 13.4h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            <span data-en="Download Velyx.exe">Télécharger Velyx.exe</span>
+          </a>
+          <a class="btn btn-ghost btn-lg" href="https://github.com/Wyze3306/Velyx/blob/main/docs/BUILDING.md" rel="noopener" data-en="Build from source">Construire depuis les sources</a>
+        </div>
+
+        <p class="cta-meta" id="dl-meta" data-en="Windows 10 and 11 · 64-bit · free and open source, GPL‑3.0">Windows 10 et 11 · 64 bits · gratuit et open source, GPL‑3.0</p>
+      </div>
+
+      <!-- signature: the client menu, running in the page -->
+      <div class="hero-show" id="menu">
+        <div class="menu" id="app">
+          <aside class="menu-side">
+            <div class="menu-head">
+              <img src="assets/velyx-icon.png" alt="" width="16" height="16">
+              <span class="menu-word">VELYX</span>
+              <span class="mono menu-ver">0.1.0</span>
+            </div>
+            <p class="menu-label" data-en="PROFILES">PROFILS</p>
+            <ul class="menu-profiles">
+              <li class="is-on"><i></i><span class="p-name" data-en="Default">Par défaut</span><em class="p-hint" data-en="every server">tous les serveurs</em></li>
+              <li><i></i><span class="p-name">Bedwars</span><em class="p-hint">hive.games</em></li>
+              <li><i></i><span class="p-name">Build</span><em class="p-hint" data-en="creative">créatif</em></li>
+              <li><i></i><span class="p-name" data-en="Recording">Enregistrement</span><em class="p-hint" data-en="lighter HUD">HUD allégé</em></li>
+            </ul>
+          </aside>
+
+          <div class="menu-main">
+            <div class="menu-bar">
+              <div class="chips" id="chips" role="group" aria-label="Catégories"></div>
+              <label class="find">
+                <svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="6.2" cy="6.2" r="4.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.4 9.4 12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                <input type="search" id="find" placeholder="Rechercher un module" data-en-placeholder="Search for a module" aria-label="Rechercher un module">
+              </label>
+            </div>
+            <div class="menu-grid" id="grid"></div>
+            <div class="menu-foot mono">
+              <span id="count">3 modules actifs</span>
+              <span class="sep">·</span>
+              <span data-en="profile Default">profil Par défaut</span>
+              <span class="sep">·</span>
+              <span>1.26.44.3</span>
+            </div>
+          </div>
+        </div>
+        <p class="show-cap" data-en="The real menu, running right here. Search it, filter it, switch things on.">Le menu, pour de vrai, ici même. Cherchez, filtrez, activez.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ─────────────────────── NOT A CHEAT ─────────────────────── -->
+  <section class="band">
+    <div class="wrap band-in">
+      <div class="band-say">
+        <p class="eyebrow" data-en="What Velyx does not do">Ce que Velyx ne fait pas</p>
+        <h2 data-en="No module plays for you.">Aucun module ne joue à votre place.</h2>
+        <p class="body" data-en="No killaura, no fly, no reach, no wallhack, no gameplay automation. The practice modules time things and count things; they never press a key for you.">Pas de killaura, pas de vol, pas de portée, pas de wallhack, aucune automatisation du jeu. Les modules d'entraînement mesurent et comptent&nbsp;: ils n'appuient sur aucune touche à votre place.</p>
+        <ul class="deny">
+          <li>Killaura</li>
+          <li data-en="Fly">Vol</li>
+          <li data-en="Reach">Portée</li>
+          <li>Wallhack</li>
+          <li data-en="Auto-clicker">Auto-clic</li>
+          <li data-en="Gameplay automation">Automatisation du jeu</li>
+        </ul>
+      </div>
+      <div class="perms">
+        <p class="eyebrow" data-en="And before you switch anything on">Et avant que vous activiez quoi que ce soit</p>
+        <p class="body" data-en="Every module states what it touches. The menu shows these tags on the card, before the switch.">Chaque module annonce ce qu'il touche. Le menu affiche ces étiquettes sur la carte, avant l'interrupteur.</p>
+        <ul class="perm-list">
+          <li><span class="tag" data-en="Network">Réseau</span><span data-en="reads the server address, checks for updates">lit l'adresse du serveur, vérifie les mises à jour</span></li>
+          <li><span class="tag" data-en="Files">Fichiers</span><span data-en="writes screenshots and profiles">écrit les captures et les profils</span></li>
+          <li><span class="tag" data-en="Simulated input">Entrées simulées</span><span data-en="holds a key you already pressed">maintient une touche que vous avez pressée</span></li>
+          <li><span class="tag" data-en="Game memory">Mémoire du jeu</span><span data-en="reads a value, e.g. your coordinates">lit une valeur, vos coordonnées par exemple</span></li>
+          <li><span class="tag" data-en="Clipboard">Presse-papiers</span><span data-en="copies a profile code">copie un code de profil</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────────────────── FEATURES ──────────────────────── -->
+  <section class="feat">
+    <div class="wrap">
+      <p class="eyebrow" data-en="What it does">Ce que ça fait</p>
+      <h2 class="sec-h" data-en="Four things, done properly.">Quatre choses, bien faites.</h2>
+
+      <div class="feat-grid">
+        <article class="fcard">
+          <svg class="fico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m15.2 15.2 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <h3 data-en="One menu, one search">Un menu, une recherche</h3>
+          <p data-en="Ctrl+K opens the palette. Type three letters and you land on the module or the setting, without walking through pages.">Ctrl+K ouvre la palette. Tapez trois lettres et vous tombez sur le module ou le réglage, sans parcourir les pages.</p>
+        </article>
+        <article class="fcard">
+          <svg class="fico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="6" y="7.5" width="6.5" height="4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 15.5h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <h3 data-en="A HUD you place yourself">Un HUD que vous placez</h3>
+          <p data-en="Pick an element up, put it down. Grid, snapping, alignment guides, groups. Arrow keys handle the last pixel.">Prenez un élément, posez-le. Grille, aimantation, repères d'alignement, groupes. Les flèches du clavier font le pixel près.</p>
+        </article>
+        <article class="fcard">
+          <svg class="fico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="17.5" cy="17" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          <h3 data-en="Profiles that follow you">Des profils qui suivent</h3>
+          <p data-en="Modules, HUD and theme travel together. Velyx switches profile based on the server you join, and exports the lot as one line you can paste to a friend.">Modules, HUD et thème voyagent ensemble. Velyx change de profil selon le serveur que vous rejoignez, et exporte le tout en une ligne à coller à un ami.</p>
+        </article>
+        <article class="fcard">
+          <svg class="fico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="12" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="9" y="10" width="12" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          <h3 data-en="Several accounts at once">Plusieurs comptes à la fois</h3>
+          <p data-en="The launcher builds isolated copies of the game. They all run at the same time, one Microsoft account each.">Le launcher crée des copies isolées du jeu. Elles tournent toutes en même temps, avec chacune son compte Microsoft.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──────────────────────── HUD EDITOR ──────────────────────── -->
+  <section class="shot" id="hud">
+    <div class="wrap shot-in">
+      <div class="shot-say">
+        <p class="eyebrow" data-en="HUD editor">Éditeur de HUD</p>
+        <h2 data-en="Your screen, your layout.">Votre écran, à votre main.</h2>
+        <p class="body" data-en="Open the editor, grab the FPS counter, drop it where you want it. The green guides appear only while a piece snaps, then they go. Rotation, opacity, locking, and groups so a whole cluster moves at once.">Ouvrez l'éditeur, attrapez le compteur de FPS, posez-le où vous voulez. Les repères verts n'apparaissent que le temps de l'aimantation, puis s'effacent. Rotation, opacité, verrouillage, et des groupes pour tout déplacer d'un bloc.</p>
+        <ul class="ticks">
+          <li data-en="Grid and snapping">Grille et aimantation</li>
+          <li data-en="Alignment guides">Repères d'alignement</li>
+          <li data-en="Element groups">Groupes d'éléments</li>
+          <li data-en="Pixel nudge with the arrow keys">Réglage au pixel aux flèches</li>
+        </ul>
+      </div>
+
+      <figure class="mock mock-hud">
+        <div class="hud-scene">
+          <span class="guide guide-v" aria-hidden="true"></span>
+          <span class="guide guide-h" aria-hidden="true"></span>
+
+          <div class="hud-el hud-fps"><span class="mono">312</span> FPS</div>
+          <div class="hud-el hud-coords mono">128, 64, -412</div>
+
+          <div class="hud-el hud-keys is-picked">
+            <div class="keys">
+              <span></span><span class="k-w">W</span><span></span>
+              <span class="k-a">A</span><span>S</span><span>D</span>
+            </div>
+            <span class="pick-tool" aria-hidden="true">
+              <b class="pt-grab"></b><b class="pt-cog"></b><b class="pt-lock"></b><b class="pt-x"></b>
+            </span>
+          </div>
+
+          <div class="hud-el hud-cps mono">7 CPS</div>
+        </div>
+        <figcaption class="mono" data-en="Keystrokes · snapped to centre · group “combat”">Keystrokes · aimanté au centre · groupe «&nbsp;combat&nbsp;»</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── LAUNCHER ───────────────────────── -->
+  <section class="shot shot-flip" id="launcher">
+    <div class="wrap shot-in">
+      <div class="shot-say">
+        <p class="eyebrow" data-en="Launcher">Launcher</p>
+        <h2 data-en="Two accounts, two windows, at the same time.">Deux comptes, deux fenêtres, en même temps.</h2>
+        <p class="body" data-en="Windows normally refuses to start Minecraft Bedrock twice. The launcher gets around that by giving each instance its own application identity: hard-linked game files, a rewritten manifest, a separate registration. Windows then treats them as two different apps, each with its own Xbox sign-in.">Windows refuse normalement de lancer deux fois Minecraft Bedrock. Le launcher contourne ça en donnant à chaque instance sa propre identité d'application&nbsp;: des fichiers en liens durs, un manifeste réécrit, un enregistrement séparé. Windows les voit alors comme deux applications différentes, chacune avec sa connexion Xbox.</p>
+        <div class="notes">
+          <p><b data-en="No password goes through Velyx.">Aucun mot de passe ne passe par Velyx.</b> <span data-en="Velyx stores no credentials and no tokens. In the launcher, an account is a label on an instance — the sign-in happens in the game and stays there.">Dans le launcher, un compte est une étiquette posée sur une instance&nbsp;: la connexion se fait dans le jeu et y reste.</span></p>
+          <p><b data-en="Developer Mode required.">Demande le mode développeur.</b> <span data-en="Creating instances needs Windows Developer Mode. The launcher checks before you try, and tells you how to turn it on.">Le launcher vérifie avant d'essayer, et vous dit comment l'activer.</span></p>
+        </div>
+      </div>
+
+      <figure class="mock mock-launch">
+        <div class="lc-head">
+          <span class="mono lc-title">VELYX LAUNCHER</span>
+          <span class="lc-new" data-en="New instance">Nouvelle instance</span>
+        </div>
+        <ul class="lc-rows">
+          <li>
+            <i class="av av-1">M</i>
+            <span class="lc-name"><b data-en="Main">Principal</b><em>MainAccount</em></span>
+            <span class="mono lc-ver">1.26.44</span>
+            <span class="lc-state is-live" data-en="Running">En cours</span>
+          </li>
+          <li>
+            <i class="av av-2">S</i>
+            <span class="lc-name"><b data-en="Second">Second</b><em>AltAccount</em></span>
+            <span class="mono lc-ver">1.26.44</span>
+            <span class="lc-state is-live" data-en="Running">En cours</span>
+          </li>
+          <li>
+            <i class="av av-3">T</i>
+            <span class="lc-name"><b data-en="Testing">Tests</b><em data-en="no account">aucun compte</em></span>
+            <span class="mono lc-ver">1.25.60</span>
+            <span class="lc-state" data-en="Launch">Lancer</span>
+          </li>
+        </ul>
+        <figcaption class="mono" data-en="Two instances live · one Microsoft account each">Deux instances lancées · un compte Microsoft chacune</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── MODULES ───────────────────────── -->
+  <section class="mods" id="modules">
+    <div class="wrap">
+      <p class="eyebrow" data-en="The inventory">L'inventaire</p>
+      <h2 class="sec-h" data-en="45 modules. Here they all are.">45 modules. Les voici tous.</h2>
+      <p class="sec-p" data-en="No partial list, no “and much more”.">Pas de liste partielle, pas de «&nbsp;et bien plus encore&nbsp;».</p>
+      <div class="mod-cols" id="mod-cols"></div>
+      <p class="sec-note" data-en="Two of them — hit colour and damage tint — are written but wait on a signature for the game version you play. The menu says so instead of pretending.">Deux d'entre eux — couleur de coup et teinte de dégâts — sont écrits mais attendent une signature pour la version du jeu que vous jouez. Le menu le dit, au lieu de faire semblant.</p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── SIGNATURES ─────────────────────── -->
+  <section class="sig">
+    <div class="wrap sig-in">
+      <div>
+        <p class="eyebrow" data-en="Game updates">Mises à jour du jeu</p>
+        <h2 data-en="A Bedrock update doesn&rsquo;t take everything down.">Une mise à jour de Bedrock ne casse pas tout.</h2>
+        <p class="body" data-en="Velyx holds no game memory addresses. Everything it reads from the game goes through a name, resolved at startup from a signature file. A new game version needs a new file, not a new build. And when one is missing, only the feature that needed it switches off — it says so on the Diagnostics page, and the game keeps running.">Velyx ne contient aucune adresse mémoire du jeu. Tout ce qu'il lit passe par un nom, résolu au démarrage depuis un fichier de signatures. Une nouvelle version du jeu demande un nouveau fichier, pas une nouvelle compilation. Et s'il en manque un, seule la fonction concernée s'éteint&nbsp;: elle le dit sur la page Diagnostic, et le jeu continue.</p>
+      </div>
+      <div class="sig-box">
+        <p class="eyebrow" data-en="Works with no signature file at all">Marche même sans fichier de signatures</p>
+        <ul class="sig-list">
+          <li data-en="Menu, themes, profiles">Menu, thèmes, profils</li>
+          <li data-en="HUD editor">Éditeur de HUD</li>
+          <li>FPS, CPS, <span data-en="clock">horloge</span>, keystrokes</li>
+          <li data-en="Memory and performance graph">Mémoire et graphique de performance</li>
+          <li data-en="Screenshots and screen filters">Captures et filtres d'écran</li>
+          <li data-en="Playtime and benchmark">Temps de jeu et benchmark</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── INSTALL ───────────────────────── -->
+  <section class="steps" id="install">
+    <div class="wrap">
+      <p class="eyebrow" data-en="Install">Installer</p>
+      <h2 class="sec-h" data-en="Three steps.">Trois étapes.</h2>
+
+      <ol class="step-list">
+        <li>
+          <span class="mono step-n">1</span>
+          <h3 data-en="Download Velyx.exe">Téléchargez Velyx.exe</h3>
+          <p data-en="One file. The client, the interface fonts and the signature templates all travel inside it.">Un seul fichier. Le client, les polices de l'interface et les modèles de signatures sont dedans.</p>
+        </li>
+        <li>
+          <span class="mono step-n">2</span>
+          <h3 data-en="Run it">Lancez-le</h3>
+          <p data-en="On the first run it unpacks what it needs into %APPDATA%\Velyx. Nothing to copy next to it, nothing to install.">Au premier démarrage, il dépose ce dont il a besoin dans <code class="mono">%APPDATA%\Velyx</code>. Rien à copier à côté, rien à installer.</p>
+        </li>
+        <li>
+          <span class="mono step-n">3</span>
+          <h3 data-en="Follow the five setup screens">Suivez les cinq écrans de départ</h3>
+          <p data-en="Pick how you play, and Velyx sets sensible modules and a HUD for it. Then the game starts with the client already in.">Dites comment vous jouez, Velyx pose des modules et un HUD adaptés. Le jeu démarre ensuite avec le client déjà dedans.</p>
+        </li>
+      </ol>
+
+      <div class="steps-cta">
+        <a class="btn btn-primary btn-lg" href="https://github.com/Wyze3306/Velyx/releases" rel="noopener" data-en="Download Velyx.exe">Télécharger Velyx.exe</a>
+        <a class="btn btn-ghost btn-lg" href="https://github.com/Wyze3306/Velyx" rel="noopener" data-en="Read the source">Lire le code source</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="ftr">
+  <div class="wrap ftr-in">
+    <div class="ftr-brand">
+      <img src="assets/velyx-icon.png" alt="" width="22" height="22">
+      <span class="brand-name">VELYX</span>
+    </div>
+    <nav class="ftr-nav" aria-label="Documentation">
+      <a href="https://github.com/Wyze3306/Velyx/blob/main/docs/BUILDING.md" rel="noopener" data-en="Building">Construire</a>
+      <a href="https://github.com/Wyze3306/Velyx/blob/main/docs/ARCHITECTURE.md" rel="noopener" data-en="Architecture">Architecture</a>
+      <a href="https://github.com/Wyze3306/Velyx/blob/main/docs/ROADMAP.md" rel="noopener" data-en="Roadmap">Feuille de route</a>
+      <a href="https://github.com/Wyze3306/Velyx" rel="noopener">GitHub</a>
+      <a href="https://github.com/Wyze3306/Velyx/blob/main/LICENSE" rel="noopener" data-en="GPL‑3.0 licence">Licence GPL‑3.0</a>
+    </nav>
+    <p class="ftr-fine" data-en="Minecraft is a trademark of Mojang AB. Velyx is not affiliated with, or endorsed by, Mojang or Microsoft.">Minecraft est une marque de Mojang AB. Velyx n'est ni affilié à Mojang ou Microsoft, ni approuvé par eux.</p>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
