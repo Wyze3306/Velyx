@@ -25,7 +25,7 @@ constexpr const char* kReleasesPage = "https://github.com/Wyze3306/Velyx/release
 
 std::mutex g_mutex;
 Status g_status;
-std::thread g_worker;
+std::jthread g_worker;
 
 void setStatus(Status value) {
     const std::lock_guard lock(g_mutex);
@@ -124,7 +124,7 @@ void check(const std::string& channel) {
 
     if (g_worker.joinable()) g_worker.join();
 
-    g_worker = std::thread([channel] {
+    g_worker = std::jthread([channel] {
         Status result;
         result.checking = false;
         result.checked = true;
