@@ -5,6 +5,8 @@ project(Velyx
         DESCRIPTION "Velyx - Minecraft Bedrock Edition utility client"
         LANGUAGES C CXX)
 
+enable_language(RC)
+
 if (NOT WIN32)
     message(FATAL_ERROR
             "Velyx targets Windows x64.\n"

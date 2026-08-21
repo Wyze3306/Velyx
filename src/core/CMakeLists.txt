@@ -3,6 +3,7 @@ add_library(velyx_core STATIC
         Paths.cpp
         Strings.cpp
         Color.cpp
+        Resources.cpp
         Process.cpp)
 
 target_link_libraries(velyx_core
