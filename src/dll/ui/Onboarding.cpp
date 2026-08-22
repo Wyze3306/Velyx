@@ -134,7 +134,7 @@ void Onboarding::drawWelcome(const Rect& body) {
     float titleLeft = body.left;
 
     if (ID2D1Bitmap1* icon = gui.renderer().image(markFile)) {
-        gui.renderer().drawImageRounded(icon, mark, 9.f);
+        gui.renderer().drawImage(icon, mark);
         titleLeft = mark.right + 14.f;
     }
 

@@ -308,23 +308,7 @@ void drawMark(const Rect& rect) {
         return;
     }
 
-    // The mark is a square tile; the rounding is what makes it sit with the rest of
-    // the interface. Without a layer it is still drawn, just with square corners.
-    const float radius = std::min(rect.width(), rect.height()) * 0.26f;
-
-    ID2D1RoundedRectangleGeometry* clip = nullptr;
-    ID2D1Layer* layer = nullptr;
-
-    const bool rounded = SUCCEEDED(g_d2dFactory->CreateRoundedRectangleGeometry(
-                             D2D1::RoundedRect(toD2D(rect), radius, radius), &clip)) &&
-                         SUCCEEDED(g_target->CreateLayer(nullptr, &layer));
-
-    if (rounded) g_target->PushLayer(D2D1::LayerParameters(toD2D(rect), clip), layer);
     g_target->DrawBitmap(g_icon, toD2D(rect));
-    if (rounded) g_target->PopLayer();
-
-    if (layer) layer->Release();
-    if (clip) clip->Release();
 }
 
 void drawChevron(Vec2 centre, const Color& color) {

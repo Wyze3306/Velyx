@@ -859,12 +859,12 @@ private:
         renderer.fillRounded(badge, active.backgroundDeep.withAlpha(0.55f * alpha), 9.f);
         renderer.strokeRounded(badge, active.border.withAlpha(0.6f * alpha), 9.f, 1.f);
 
-        const Rect mark{badge.left + 7.f, badge.center().y - 8.f, badge.left + 23.f,
-                        badge.center().y + 8.f};
+        const Rect mark{badge.left + 6.f, badge.center().y - 10.f, badge.left + 26.f,
+                        badge.center().y + 10.f};
 
         static const std::filesystem::path markFile = Velyx::get().asset("icon.png");
         if (ID2D1Bitmap1* icon = renderer.image(markFile)) {
-            renderer.drawImageRounded(icon, mark, 4.5f, alpha);
+            renderer.drawImage(icon, mark, alpha);
         }
 
         renderer.text("VELYX", Rect{mark.right + 8.f, badge.top, mark.right + 52.f, badge.bottom},

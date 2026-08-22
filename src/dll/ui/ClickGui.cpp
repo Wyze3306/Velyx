@@ -341,7 +341,7 @@ void ClickGui::drawHeader(const Rect& rect) {
     static const std::filesystem::path markFile = Velyx::get().asset("icon.png");
 
     if (ID2D1Bitmap1* icon = renderer.image(markFile)) {
-        renderer.drawImageRounded(icon, mark, 7.f);
+        renderer.drawImage(icon, mark);
     } else {
         renderer.polyline({{mark.center().x - 8.f, mark.center().y - 8.f},
                            {mark.center().x, mark.center().y + 8.f},

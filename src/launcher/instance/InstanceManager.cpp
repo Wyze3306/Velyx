@@ -472,6 +472,9 @@ InstanceManager::CloneResult InstanceManager::cloneFiles(const std::filesystem::
         if (entry.is_regular_file(ec)) ++total;
     }
 
+    // Linking until proven otherwise: see the first refusal below.
+    bool linking = mode == CloneMode::Link;
+
     for (const auto& entry : std::filesystem::recursive_directory_iterator(source, ec)) {
         const auto relative = std::filesystem::relative(entry.path(), source, ec);
         const auto target = destination / relative;
@@ -485,9 +488,18 @@ InstanceManager::CloneResult InstanceManager::cloneFiles(const std::filesystem::
         std::filesystem::create_directories(target.parent_path(), ec);
 
         std::error_code fileEc;
-        if (mode == CloneMode::Link) {
+        if (linking) {
             std::filesystem::create_hard_link(entry.path(), target, fileEc);
+
+            // Whether hard links work at all is a property of the two paths, not of the
+            // file: a different volume, or a filesystem that has none. The first refusal
+            // settles it for the rest of the walk, which otherwise pays for a failing
+            // call on every one of several thousand files before copying it anyway.
             if (fileEc) {
+                linking = false;
+                Log::info(kLog, "hard links unavailable here ({}), copying the game instead",
+                          fileEc.message());
+
                 fileEc.clear();
                 std::filesystem::copy_file(entry.path(), target,
                                            std::filesystem::copy_options::overwrite_existing,
@@ -508,7 +520,11 @@ InstanceManager::CloneResult InstanceManager::cloneFiles(const std::filesystem::
 
         ++result.copied;
         if (onProgress && (result.copied % 64 == 0 || result.copied == total)) {
-            onProgress(result.copied, total, relative.string());
+
+            // Linking an instance is instant and costs no disk; copying one is neither.
+            // Whichever is happening is worth saying while it happens, not afterwards.
+            onProgress(result.copied, total,
+                       linking ? relative.string() : "copying: no hard links on this drive");
         }
     }
 
