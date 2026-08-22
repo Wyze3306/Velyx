@@ -64,6 +64,29 @@ Nothing dramatic, and that is on purpose:
 A client that refuses to boot because the game moved by four bytes is a broken
 client. This one tells you and carries on.
 
+## What each optional entry buys
+
+Most of the pack is one offset for one readout. A few entries are worth more
+than the rest, because whole categories hang off them:
+
+| Entry | Without it | With it |
+| --- | --- | --- |
+| `Level::runtimeActorList` | Nothing in **Combat** draws: no hitboxes, nametags, tracers, radar or target card | All of it |
+| `Actor::entityTypeId` | Anything wearing a nametag counts as a player, everything else as unknown | Players, hostiles, passives, items and projectiles told apart, and filtered separately |
+| `Actor::aabbDimensions` | Every box is drawn player sized, 0.6 by 1.8 | Boxes match the entity |
+| `ClientInstance::viewMatrix` | The camera is derived from the player's eye, rotation and an assumed field of view. Accurate in first person; a few pixels off in third | Exact, whatever the camera is doing |
+
+The derived camera is why the Combat category works on a pack holding little
+more than `Actor::position` and `Level::runtimeActorList`. Hitboxes carries an
+**assumed field of view** and **eye height** under its advanced settings for
+calibrating it; both disappear from the menu the moment `viewMatrix` resolves,
+because nothing reads them any more.
+
+The list is expected to be a `std::vector<Actor*>`: a begin pointer at the
+offset and an end pointer eight bytes after it. Anything that does not look like
+one — an end before the begin, a span that is not a multiple of eight, more than
+four thousand entries — is treated as no list at all rather than walked.
+
 ## Writing a pack
 
 `template.json` lists every expected name with empty patterns. Fill in the ones

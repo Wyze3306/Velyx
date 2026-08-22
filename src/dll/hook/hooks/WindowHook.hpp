@@ -18,6 +18,11 @@ public:
 
     static void setCaptureInput(bool capture);
 
+    // Whether taking capture also puts the game to sleep, the way alt-tabbing does.
+    // Refusing its input is not enough on its own: see the note by the implementation.
+    static void setSuspendGame(bool suspend);
+    [[nodiscard]] static bool suspendsGame();
+
     // Handed over rather than applied on the spot: see the note by the implementation.
     static void setTitle(std::string_view title);
     [[nodiscard]] static bool captureInput();

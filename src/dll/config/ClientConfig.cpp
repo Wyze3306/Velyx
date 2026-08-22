@@ -57,6 +57,7 @@ void ClientConfig::load() {
     }
     onboardingCompleted = json.value("onboardingCompleted", onboardingCompleted);
     telemetry = json.value("telemetry", telemetry);
+    suspendGame = json.value("suspendGame", suspendGame);
     cleanShutdown = json.value("cleanShutdown", true);
     crashStreak = json.value("crashStreak", 0);
     lastCrashModule = json.value("lastCrashModule", std::string{});
@@ -87,6 +88,7 @@ void ClientConfig::save() const {
     json["interface"] = interfaceState;
     json["onboardingCompleted"] = onboardingCompleted;
     json["telemetry"] = telemetry;
+    json["suspendGame"] = suspendGame;
     json["cleanShutdown"] = cleanShutdown;
     json["crashStreak"] = crashStreak;
     json["lastCrashModule"] = lastCrashModule;

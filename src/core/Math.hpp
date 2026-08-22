@@ -46,6 +46,17 @@ struct Vec3 {
         const float dz = z - o.z;
         return std::sqrt(dx * dx + dz * dz);
     }
+
+    [[nodiscard]] constexpr float dot(const Vec3& o) const { return x * o.x + y * o.y + z * o.z; }
+
+    [[nodiscard]] constexpr Vec3 cross(const Vec3& o) const {
+        return {y * o.z - z * o.y, z * o.x - x * o.z, x * o.y - y * o.x};
+    }
+
+    [[nodiscard]] Vec3 normalised() const {
+        const float len = length();
+        return len > 1e-6f ? Vec3{x / len, y / len, z / len} : Vec3{};
+    }
 };
 
 struct Rect {

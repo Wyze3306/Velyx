@@ -61,6 +61,10 @@ public:
     [[nodiscard]] bool ready() const { return ready_; }
     [[nodiscard]] HWND window() const { return window_; }
 
+    // Held only so a readout can ask the driver how much video memory this process is
+    // using. Nothing in the overlay's own path touches it.
+    [[nodiscard]] IDXGIAdapter3* adapter() const { return adapter_.get(); }
+
     [[nodiscard]] bool deviceLost() const { return deviceLost_; }
     void markDeviceLost();
 
@@ -96,6 +100,7 @@ private:
     ComPtr<ID2D1Device> d2dDevice_;
     ComPtr<ID2D1DeviceContext> d2dContext_;
     ComPtr<IDWriteFactory5> dwriteFactory_;
+    ComPtr<IDXGIAdapter3> adapter_;
 
     // The back buffer each target was built on, kept only to notice when the swapchain
     // hands out different ones: see attach().

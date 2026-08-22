@@ -32,6 +32,12 @@ std::mutex g_titleMutex;
 std::wstring g_pendingTitle;
 std::atomic<bool> g_titlePending{false};
 std::atomic<bool> g_releasePending{false};
+
+// 0 nothing, 1 send the game to sleep, 2 wake it. Handed to the window's own thread
+// for the same reason the title is: activation is the message loop's business.
+std::atomic<int> g_pendingActivation{0};
+std::atomic<bool> g_suspendGame{true};
+std::atomic<bool> g_suspended{false};
 Vec2 g_mouse;
 bool g_keys[256]{};
 
@@ -132,6 +138,27 @@ namespace {
 
 // Straight to the game's own procedure: dispatch() swallows keys while the client
 // is capturing, which is the very thing being worked around.
+// Refusing input is not the same as having none. Bedrock reads its keyboard and mouse
+// through GameInput, whose readings are a *state*: told there is no reading, the game
+// keeps the last one it had, so anything held when the menu opened stays held and the
+// player carries on sprinting behind it. Ctrl+K is the worst of it, because Ctrl is the
+// sprint key and it is by definition down at the moment the menu opens.
+//
+// What the game does understand is losing the window. Alt-tabbing is a path every
+// engine handles and Bedrock handles it by dropping the input and putting up its pause
+// screen — which is what "like pressing Escape" means. So that is what it is told.
+void setGameAwake(HWND window, bool awake) {
+    if (!window || !g_originalProc) return;
+
+    if (awake) {
+        CallWindowProcW(g_originalProc, window, WM_ACTIVATE, MAKEWPARAM(WA_ACTIVE, 0), 0);
+        CallWindowProcW(g_originalProc, window, WM_SETFOCUS, 0, 0);
+    } else {
+        CallWindowProcW(g_originalProc, window, WM_KILLFOCUS, 0, 0);
+        CallWindowProcW(g_originalProc, window, WM_ACTIVATE, MAKEWPARAM(WA_INACTIVE, 0), 0);
+    }
+}
+
 void releaseHeldKeys(HWND window) {
     if (!window || !g_originalProc) return;
 
@@ -185,11 +212,43 @@ void WindowHook::setCaptureInput(bool capture) {
         // Ctrl that is no longer down. Opening the menu with Ctrl+K did exactly that.
         // The releases are handed to the window's own thread, like the title.
         g_releasePending.store(true, std::memory_order_release);
-        if (g_window) PostMessageW(g_window, WM_NULL, 0, 0);
+
+        if (g_suspendGame.load(std::memory_order_acquire)) {
+            g_suspended.store(true, std::memory_order_release);
+            g_pendingActivation.store(1, std::memory_order_release);
+        }
     } else {
         while (ShowCursor(FALSE) >= 0) {}
+
+        // Woken whatever the setting says now: turning it off while the game is asleep
+        // must not leave it there.
+        if (g_suspended.exchange(false, std::memory_order_acq_rel)) {
+            g_pendingActivation.store(2, std::memory_order_release);
+        }
     }
+
+    if (g_window) PostMessageW(g_window, WM_NULL, 0, 0);
 }
+
+// Changed with an interface already open, this has to take effect now rather than at
+// the next one: switched off, the game is asleep and nothing else would wake it until
+// that interface closes.
+void WindowHook::setSuspendGame(bool suspend) {
+    if (g_suspendGame.exchange(suspend, std::memory_order_acq_rel) == suspend) return;
+
+    if (!suspend) {
+        if (!g_suspended.exchange(false, std::memory_order_acq_rel)) return;
+        g_pendingActivation.store(2, std::memory_order_release);
+    } else {
+        if (!captureInput()) return;
+        if (g_suspended.exchange(true, std::memory_order_acq_rel)) return;
+        g_pendingActivation.store(1, std::memory_order_release);
+    }
+
+    if (g_window) PostMessageW(g_window, WM_NULL, 0, 0);
+}
+
+bool WindowHook::suspendsGame() { return g_suspendGame.load(std::memory_order_acquire); }
 
 bool WindowHook::captureInput() { return g_capture.load(std::memory_order_relaxed); }
 
@@ -263,6 +322,12 @@ LRESULT CALLBACK WindowHook::wndProc(HWND window, UINT message, WPARAM wParam, L
     }
 
     if (g_releasePending.exchange(false, std::memory_order_acq_rel)) releaseHeldKeys(window);
+
+    // After the releases, so the game is not asked to sleep on a key it still thinks
+    // is down, and before anything else is dispatched.
+    if (const int activation = g_pendingActivation.exchange(0, std::memory_order_acq_rel)) {
+        setGameAwake(window, activation == 2);
+    }
 
     if (g_titlePending.exchange(false, std::memory_order_acq_rel)) {
         std::wstring title;

@@ -112,6 +112,34 @@ Failure is always local:
 themselves; they read `game().player()` or `game().world()`, refreshed once per
 frame.
 
+## The world snapshot
+
+Three things sit behind that façade, refreshed in this order at the top of every
+frame:
+
+```
+FrameEvent
+  ├─ Game::onFrame        (First)  client instance, player, world
+  ├─ Camera::onFrame      (First)  view-projection, camera basis
+  └─ Entities::onFrame    (High)   the level's actor list, near to far
+```
+
+`Entities` copies the list out rather than handing modules a pointer into it. That
+is not caution for its own sake: eight modules drawing over the same entities read
+it once between them, and an entity that dies halfway through the frame cannot
+take a module down with it. The list is capped, sorted by distance and validated —
+an end pointer before the begin, a span that is not a multiple of eight, a position
+outside the world: each one means no list at all rather than a walk into nothing.
+
+`Camera` answers `project(world) -> screen` two ways. With
+`ClientInstance::viewMatrix` in the pack it multiplies through the game's own
+matrix and is exact whatever the camera is doing. Without it, it builds a basis
+from the player's eye, yaw and pitch and an assumed field of view. The second is a
+few pixels off in third person and right in first — which is the difference
+between a category that needs one more signature to exist and one that needs two.
+`exact()` says which one answered, and the Hitboxes calibration settings hide
+themselves the moment it returns true.
+
 ## Events
 
 `EventBus` is typed, synchronous, priority ordered and cancellable.
@@ -135,8 +163,15 @@ Module                      identity, settings, keybind, permissions
  │       ├─ CpsHud
  │       └─ …
  ├─ Zoom, FreeLook, …       movement modules
+ ├─ Hitboxes, Radar, …      combat modules, over sdk::Entities and sdk::Camera
  └─ ClickGui, HudEditor, …  client surfaces, marked essential
 ```
+
+One trap is worth naming, because it is invisible until something depends on it:
+`HudModule::onRender` calls `relevantNow()` first and only measures the element if
+it says yes. Work that decides *whether* an element should be on screen therefore
+cannot live in `contentSize()` — once faded out it would never be asked again.
+`TargetHud` resolves its target on `FrameEvent` for exactly that reason.
 
 `HudModule` implements placement once for everyone. A subclass answers "how big
 are you?" and "draw yourself here", and inherits the rest. `TextHud` goes further

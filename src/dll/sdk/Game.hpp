@@ -79,6 +79,14 @@ public:
 
     [[nodiscard]] float horizontalSpeed() const { return horizontalSpeed_; }
 
+    // The two anchors everything else in the SDK hangs off. Handed out as addresses
+    // rather than as objects on purpose: they are only valid for the frame that read
+    // them, and every read through them still goes past memory::readable().
+    [[nodiscard]] uintptr_t clientInstance() const { return clientInstance_; }
+    [[nodiscard]] uintptr_t localPlayer() const { return localPlayer_; }
+
+    [[nodiscard]] uintptr_t level() const;
+
 private:
     Game() = default;
 
@@ -93,6 +101,7 @@ private:
     std::string screen_;
 
     uintptr_t clientInstance_ = 0;
+    uintptr_t localPlayer_ = 0;
     bool available_ = false;
 
     Vec3 previousPosition_;

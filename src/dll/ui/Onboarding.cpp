@@ -31,18 +31,20 @@ struct Preset {
 };
 
 constexpr std::array<Preset, 3> kPresets{{
-    {"pvp", "PvP", "A compact HUD: crosshair, latency and framerate up front.", "PvP",
+    {"pvp", "PvP", "Hitboxes, target card and reach, on a compact HUD.", "PvP",
      "Night"},
-    {"survival", "Survival", "Coordinates, compass, armour and session stats.", "Survival",
+    {"survival", "Survival", "Coordinates, compass, armour, waypoints and light.", "Survival",
      "Velyx"},
     {"stream", "Streaming", "Personal details hidden, screenshots filed away.", "Global",
      "Velyx"},
 }};
 
-const char* const kPvpModules[] = {"fps", "cps", "ping", "keystrokes", "crosshair",
+const char* const kPvpModules[] = {"fps",        "cps",        "ping",     "keystrokes",
+                                   "crosshair",  "hitboxes",   "nametags", "target_hud",
+                                   "hit_marker", "low_health", "reach",    "frame_limiter",
                                    "performance_mode"};
-const char* const kSurvivalModules[] = {"coordinates", "direction", "clock", "armour",
-                                        "session_stats"};
+const char* const kSurvivalModules[] = {"coordinates", "direction", "clock",  "armour",
+                                        "session_stats", "waypoints", "fullbright"};
 const char* const kStreamModules[] = {"streamer_mode", "clock", "fps", "screenshot_mode"};
 
 } // namespace

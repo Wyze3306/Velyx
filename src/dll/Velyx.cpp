@@ -23,6 +23,7 @@
 #include "dll/module/ModuleManager.hpp"
 #include "dll/render/Font.hpp"
 #include "dll/render/GraphicsContext.hpp"
+#include "dll/sdk/Entities.hpp"
 #include "dll/sdk/Game.hpp"
 #include "dll/ui/Theme.hpp"
 #include "dll/ui/Ui.hpp"
@@ -112,12 +113,15 @@ void Velyx::bootstrap() {
 
     crash::install();
 
+    WindowHook::setSuspendGame(settings.suspendGame);
+
     const bool safeMode = settings.shouldStartInSafeMode();
     if (safeMode) {
         Log::warn(kLog, "starting in safe mode after {} crashes", settings.crashStreak);
     }
 
     sdk::bindGame();
+    sdk::bindWorld();
 
     Signatures& signatures = Signatures::get();
     Log::info(kLog, "Minecraft {}", signatures.gameVersion());

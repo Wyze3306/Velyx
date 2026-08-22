@@ -10,6 +10,7 @@ constexpr const char* kLog = "Module";
 const char* categoryName(ModuleCategory category) {
     switch (category) {
         case ModuleCategory::Movement: return "movement";
+        case ModuleCategory::Combat:   return "combat";
         case ModuleCategory::Hud:      return "hud";
         case ModuleCategory::Render:   return "render";
         case ModuleCategory::Utility:  return "utility";
@@ -23,6 +24,7 @@ const char* categoryName(ModuleCategory category) {
 const char* categoryLabel(ModuleCategory category) {
     switch (category) {
         case ModuleCategory::Movement: return "Movement";
+        case ModuleCategory::Combat:   return "Combat";
         case ModuleCategory::Hud:      return "HUD";
         case ModuleCategory::Render:   return "Render";
         case ModuleCategory::Utility:  return "Utility";
@@ -40,6 +42,7 @@ std::vector<std::string> ModulePermissions::describe() const {
     if (inputSynthesis) list.emplace_back("Synthetic input");
     if (memoryPatch) list.emplace_back("Game memory");
     if (clipboard) list.emplace_back("Clipboard");
+    if (system) list.emplace_back("System");
     return list;
 }
 

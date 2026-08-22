@@ -29,6 +29,11 @@ public:
     bool onboardingCompleted = false;
     bool telemetry = false;
 
+    // Whether opening an interface puts the game to sleep behind it, the way alt-tabbing
+    // does. Off leaves the game running with its input refused, which is not the same
+    // thing: see the note in WindowHook::setCaptureInput.
+    bool suspendGame = true;
+
     Keybind guiKey{VK_INSERT, false, false, false, Keybind::Mode::Toggle};
 
     // The menu's second way in: it opens on the module list with the search field

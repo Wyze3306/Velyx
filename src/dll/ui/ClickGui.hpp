@@ -23,7 +23,8 @@ public:
 private:
     enum class Page { Modules, Themes, Profiles, Keybinds, Diagnostics, History, Captures };
 
-    enum class Filter { All, Favourites, Movement, Hud, Render, Utility, Misc, Scripts, Client };
+    enum class Filter { All, Favourites, Movement, Hud, Render, Utility, Misc, Scripts,
+                        Client, Combat };
 
     void onRender(RenderTopEvent& event);
     void onMouse(MouseEvent& event);

@@ -81,6 +81,7 @@ void GraphicsContext::markDeviceLostLocked(std::string_view reason, Sync sync) {
 // ours still standing when it dies. So it goes now, inside the same Present call,
 // rather than at the rebuild the game never lives to see.
 void GraphicsContext::releaseInterop() {
+    adapter_.reset();
     d2dContext_.reset();
     d2dDevice_.reset();
     device11On12_.reset();
@@ -388,6 +389,13 @@ bool GraphicsContext::createD2D(IUnknown* deviceForD2D) {
         return false;
     }
 
+    // The same DXGI device already in hand: asking for the adapter here costs a
+    // QueryInterface rather than a second walk of the factory.
+    if (ComPtr<IDXGIAdapter> adapter; SUCCEEDED(dxgiDevice->GetAdapter(adapter.put()))) {
+        adapter->QueryInterface(__uuidof(IDXGIAdapter3),
+                                reinterpret_cast<void**>(adapter_.put()));
+    }
+
     hr = d2dFactory_->CreateDevice(dxgiDevice.get(), d2dDevice_.put());
     if (FAILED(hr)) {
         Log::error(kLog, "ID2D1Factory1::CreateDevice failed (0x{:08X})", static_cast<unsigned>(hr));
@@ -521,6 +529,7 @@ void GraphicsContext::shutdown() {
 
     releaseTargets();
 
+    adapter_.reset();
     d2dContext_.reset();
     d2dDevice_.reset();
     d2dFactory_.reset();

@@ -100,6 +100,7 @@ void Game::requireSignatures() {
 
 void Game::refreshPlayer() {
     player_ = {};
+    localPlayer_ = 0;
 
     const int localPlayerOffset = sig::offset(names::kLocalPlayerOffset);
     if (clientInstance_ == 0 || localPlayerOffset < 0) return;
@@ -107,6 +108,8 @@ void Game::refreshPlayer() {
     const auto localPlayer = memory::read<uintptr_t>(
         clientInstance_ + static_cast<uintptr_t>(localPlayerOffset));
     if (!memory::readable(reinterpret_cast<const void*>(localPlayer), 8)) return;
+
+    localPlayer_ = localPlayer;
 
     player_.valid = true;
 
@@ -207,6 +210,7 @@ void Game::onFrame(FrameEvent& event) {
         }
         player_ = {};
         world_ = {};
+        localPlayer_ = 0;
         return;
     }
 
@@ -226,6 +230,14 @@ void Game::onFrame(FrameEvent& event) {
 
 bool Game::inMenu() const {
     return !screen_.empty() && screen_ != "hud_screen";
+}
+
+uintptr_t Game::level() const {
+    const int offset = sig::offset(names::kLevelOffset);
+    if (clientInstance_ == 0 || offset < 0) return 0;
+
+    const auto level = memory::read<uintptr_t>(clientInstance_ + static_cast<uintptr_t>(offset));
+    return memory::readable(reinterpret_cast<const void*>(level), 8) ? level : 0;
 }
 
 bool Game::sendChat(const std::string& message) {

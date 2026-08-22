@@ -17,11 +17,20 @@
     "ClientInstance::level": -1,
     "ClientInstance::screenName": -1,
 
+    "_comment_camera": "Optional. With the view matrix Velyx projects exactly, third person included. Without it the camera is derived from the player's eye and rotation, and the overlays calibrate against an assumed field of view.",
+    "ClientInstance::viewMatrix": -1,
+    "ClientInstance::cameraOrigin": -1,
+    "ClientInstance::fieldOfView": -1,
+
     "Actor::position": -1,
     "Actor::velocity": -1,
     "Actor::rotation": -1,
     "Actor::onGround": -1,
     "Actor::nameTag": -1,
+
+    "_comment_actor": "Optional. Dimensions size the hitboxes; without them everything is drawn player sized. The type id sorts entities into players, hostiles and the rest; without it, anything carrying a nametag is treated as a player.",
+    "Actor::aabbDimensions": -1,
+    "Actor::entityTypeId": -1,
 
     "Player::health": -1,
     "Player::maxHealth": -1,
@@ -33,6 +42,8 @@
 
     "Connection::serverAddress": -1,
     "RakNetConnector::ping": -1,
+
+    "_comment_level": "A std::vector<Actor*>: begin at the offset, end eight bytes later. Everything in the Combat category reads through this one entry.",
     "Level::runtimeActorList": -1
   }
 }

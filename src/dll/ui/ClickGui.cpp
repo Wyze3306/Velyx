@@ -18,9 +18,10 @@
 #include "dll/config/ProfileManager.hpp"
 #include "dll/hook/HookManager.hpp"
 #include "dll/hook/hooks/WindowHook.hpp"
+#include "dll/feature/Clipboard.hpp"
+#include "dll/feature/Clips.hpp"
 #include "dll/feature/CrashReporter.hpp"
 #include "dll/feature/Playtime.hpp"
-#include "dll/feature/Clips.hpp"
 #include "dll/feature/Screenshot.hpp"
 #include "dll/feature/Updates.hpp"
 #include "dll/feature/Services.hpp"
@@ -48,8 +49,10 @@ struct FilterItem {
     int filter;
 };
 
+// Ordered for the eye, numbered for the enum: Combat was added after the others and
+// keeps the last value so no saved filter changes meaning.
 const FilterItem kFilters[] = {
-    {"All", 0}, {"Favourites", 1}, {"Movement", 2}, {"HUD", 3},
+    {"All", 0}, {"Favourites", 1}, {"Combat", 9}, {"Movement", 2}, {"HUD", 3},
     {"Render", 4}, {"Utility", 5}, {"Misc", 6}, {"Scripts", 7}, {"Client", 8},
 };
 
@@ -63,42 +66,6 @@ const PageItem kPages[] = {
     {"Screenshots", 6}, {"Keybinds", 3}, {"Diagnostics", 4},
 };
 
-// Used by the share code and by nothing else; it stays here rather than in core,
-// which knows nothing about windows beyond paths.
-bool copyToClipboard(const std::string& text) {
-    if (!OpenClipboard(nullptr)) return false;
-
-    bool copied = false;
-    EmptyClipboard();
-
-    if (const HGLOBAL handle = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1)) {
-        if (void* memory = GlobalLock(handle)) {
-            std::memcpy(memory, text.c_str(), text.size() + 1);
-            GlobalUnlock(handle);
-            copied = SetClipboardData(CF_TEXT, handle) != nullptr;
-        }
-        if (!copied) GlobalFree(handle);
-    }
-
-    CloseClipboard();
-    return copied;
-}
-
-std::string clipboardText() {
-    if (!OpenClipboard(nullptr)) return {};
-
-    std::string text;
-    if (const HANDLE handle = GetClipboardData(CF_TEXT)) {
-        if (const char* memory = static_cast<const char*>(GlobalLock(handle))) {
-            text.assign(memory, strnlen(memory, GlobalSize(handle)));
-            GlobalUnlock(handle);
-        }
-    }
-
-    CloseClipboard();
-    return text;
-}
-
 ModuleCategory categoryForFilter(int filter) {
     switch (filter) {
         case 2: return ModuleCategory::Movement;
@@ -108,6 +75,7 @@ ModuleCategory categoryForFilter(int filter) {
         case 6: return ModuleCategory::Misc;
         case 7: return ModuleCategory::Script;
         case 8: return ModuleCategory::Client;
+        case 9: return ModuleCategory::Combat;
         default: return ModuleCategory::Client;
     }
 }
@@ -124,6 +92,12 @@ ClickGui::ClickGui()
     settings.header("Interface");
     settings.dropdown("language", "Language", config().language,
                       lang::available(Velyx::get().asset("lang")));
+
+    settings.header("While it is open");
+    settings.toggle("suspendGame", "Send the game to sleep", config().suspendGame,
+                    "Stops the game behind the interface, the way alt-tabbing stops it. "
+                    "Off leaves it running with its input merely refused, which is not the "
+                    "same thing: whatever was held stays held.");
 
     settings.header("Window");
     settings.toggle("rememberPosition", "Remember the position", true);
@@ -242,6 +216,15 @@ void ClickGui::onRender(RenderTopEvent& event) {
         wanted != lang::code()) {
         lang::load(wanted, Velyx::get().asset("lang"));
         config().language = wanted;
+        config().save();
+    }
+
+    // Same reasoning as the language above: read from this module's own settings, on
+    // the thread that acts on them.
+    if (const bool suspend = settings.value<bool>("suspendGame", true);
+        suspend != WindowHook::suspendsGame()) {
+        WindowHook::setSuspendGame(suspend);
+        config().suspendGame = suspend;
         config().save();
     }
 
@@ -488,22 +471,40 @@ void ClickGui::drawSidebar(const Rect& rect) {
     }
 }
 
+// The chips and the search field share one row, and a translated label is as long as
+// the language makes it. The padding between them is fitted to what is left rather
+// than fixed, so a category never ends up under the search field.
 void ClickGui::drawCategoryBar(const Rect& rect) {
     Ui& gui = ui();
     const auto& active = theme();
 
+    const Rect search{rect.right - 268.f, rect.center().y - 16.f, rect.right - 20.f,
+                      rect.center().y + 16.f};
+
+    FontSpec spec;
+    spec.family = active.fontFamily;
+    spec.size = 12.f * active.fontScale;
+    spec.weight = FontWeight::SemiBold;
+
+    float labels = 0.f;
+    for (const FilterItem& item : kFilters) {
+        labels += gui.renderer().measure(tr(item.label), spec).x;
+    }
+
+    constexpr auto kChips = static_cast<float>(std::size(kFilters));
+    const float available = std::max(0.f, (search.left - 12.f) - (rect.left + 20.f));
+
+    // Padding first, spacing after: chips that touch read worse than chips that are
+    // merely tight.
+    const float padding = clamp((available - labels - (kChips - 1.f) * 4.f) / kChips, 12.f, 26.f);
+    const float gap = clamp((available - labels - kChips * padding) / (kChips - 1.f), 2.f, 6.f);
+
     float x = rect.left + 20.f;
     for (const FilterItem& item : kFilters) {
-        const float width = gui.renderer().measure(item.label, [&] {
-            FontSpec spec;
-            spec.family = active.fontFamily;
-            spec.size = 12.f * active.fontScale;
-            spec.weight = FontWeight::SemiBold;
-            return spec;
-        }()).x + 26.f;
+        const float width = gui.renderer().measure(tr(item.label), spec).x + padding;
 
         const Rect chip{x, rect.center().y - 15.f, x + width, rect.center().y + 15.f};
-        x += width + 6.f;
+        x += width + gap;
 
         if (gui.chip(UiId("filter", item.filter), chip, item.label,
                      static_cast<int>(filter_) == item.filter)) {
@@ -511,9 +512,6 @@ void ClickGui::drawCategoryBar(const Rect& rect) {
             search_.clear();
         }
     }
-
-    const Rect search{rect.right - 268.f, rect.center().y - 16.f, rect.right - 20.f,
-                      rect.center().y + 16.f};
 
     const UiId searchId("search");
     if (focusSearch_) {
@@ -947,7 +945,7 @@ void ClickGui::drawThemesPage(const Rect& rect) {
     if (gui.button(UiId("theme_copy"),
                    Rect{actions.left + 200.f, actions.top, actions.left + 340.f, actions.bottom},
                    "Copy the theme")) {
-        if (copyToClipboard(manager.exportCode())) {
+        if (clipboard::copy(manager.exportCode())) {
             Notifications::success("Theme copied",
                                    "Paste the code to share how the interface looks.");
         } else {
@@ -959,7 +957,7 @@ void ClickGui::drawThemesPage(const Rect& rect) {
                    Rect{actions.left + 350.f, actions.top, actions.left + 490.f, actions.bottom},
                    "Paste a theme")) {
         std::string imported;
-        if (manager.importCode(clipboardText(), &imported)) {
+        if (manager.importCode(clipboard::read(), &imported)) {
             config().theme = imported;
             config().save();
             Notifications::success("Theme imported", imported);
@@ -1061,7 +1059,7 @@ void ClickGui::drawProfilesPage(const Rect& rect) {
         const std::string code = manager.exportCode();
         profileCode_ = code;
 
-        if (copyToClipboard(code)) {
+        if (clipboard::copy(code)) {
             Notifications::success("Code copied", "Paste it to share your set-up.");
         } else {
             Notifications::warning("Clipboard unavailable", "The code stays in the field.");

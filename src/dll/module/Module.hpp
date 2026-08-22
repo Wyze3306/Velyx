@@ -14,6 +14,7 @@ namespace velyx {
 
 enum class ModuleCategory {
     Movement,
+    Combat,
     Hud,
     Render,
     Utility,
@@ -32,8 +33,12 @@ struct ModulePermissions {
     bool memoryPatch = false;
     bool clipboard = false;
 
+    // Anything that reaches past the game into the process or the machine: priority,
+    // core affinity, timer resolution. Nothing a module does to the game itself.
+    bool system = false;
+
     [[nodiscard]] bool any() const {
-        return network || files || inputSynthesis || memoryPatch || clipboard;
+        return network || files || inputSynthesis || memoryPatch || clipboard || system;
     }
     [[nodiscard]] std::vector<std::string> describe() const;
 };
