@@ -5,17 +5,33 @@
 #include <algorithm>
 #include <cmath>
 
+#include "dll/hook/Turn.hpp"
+#include "dll/hook/hooks/FovHook.hpp"
+#include "dll/hook/hooks/PerspectiveHook.hpp"
 #include "dll/module/ModuleManager.hpp"
 #include "dll/sdk/Game.hpp"
 
 namespace velyx {
 namespace {
 
+// Every module below that reads or writes a turn stands on the same thing: a door
+// through which the game actually collects its mouse. Which door that is depends on
+// the machine and on the pack, and whether any of them carries it is not known while
+// the catalogue is being built, so they all ask rather than assume.
+bool mouseHookReady() { return turn::carried(); }
+
+// Judged from the speed where the pack cannot say: walking is four blocks a second and
+// a bit, sprinting five and a half.
+bool sprinting(const sdk::PlayerState& player) {
+    return player.sprinting || sdk::game().horizontalSpeed() > 5.f;
+}
+
 class Zoom final : public Module {
 public:
     Zoom()
         : Module("zoom", "Zoom", ModuleCategory::Movement,
                  "Narrows the field of view while the key is held.") {
+        markWaitingUnless("the FOV hook", FovHook::live);
         settings.slider("amount", "Zoom factor", 3.f, 1.2f, 12.f, "", "x");
         settings.slider("smoothing", "Smoothness", 14.f, 1.f, 40.f,
                         "Lower is a slower transition.");
@@ -26,7 +42,10 @@ public:
 
         keybind() = Keybind{'C', false, false, false, Keybind::Mode::Hold};
 
-        on(&Zoom::onFov);
+        // Both outlive the key: released, the zoom eases back out over a few frames,
+        // and the field of view has to keep being answered for until it has.
+        always(&Zoom::onFrame);
+        always(&Zoom::onFov);
         on(&Zoom::onTurn);
         addKeywords({"zoom", "fov", "magnify"});
     }
@@ -35,14 +54,21 @@ public:
     void onDisable() override { progress_.to(0.f); }
 
 private:
-    void onFov(FovEvent& event) {
+    // The animation runs on the frame. The game asks for its field of view more than
+    // once a frame, and an animation stepped on every ask runs twice as fast as set.
+    void onFrame(FrameEvent& event) {
         progress_.speed = settings.value<float>("smoothing", 14.f);
-        progress_.to(1.f);
-        progress_.update(1.f / 60.f);
+        progress_.update(event.deltaSeconds);
+
+        const float amount = settings.value<float>("amount", 3.f);
+        currentFactor_ = lerp(1.f, amount, progress_.value);
+    }
+
+    void onFov(FovEvent& event) {
+        if (progress_.value <= 0.001f) return;
 
         const float amount = settings.value<float>("amount", 3.f);
         event.fov = lerp(event.fov, event.fov / amount, progress_.value);
-        currentFactor_ = lerp(1.f, amount, progress_.value);
     }
 
     void onTurn(TurnDeltaEvent& event) {
@@ -71,6 +97,7 @@ public:
     FovChanger()
         : Module("fov_changer", "Custom FOV", ModuleCategory::Movement,
                  "Allows a field of view past the game's own limits.") {
+        markWaitingUnless("the FOV hook", FovHook::live);
         settings.slider("fov", "Field of view", 90.f, 30.f, 150.f, "", "°");
         settings.toggle("overrideAll", "Ignore the game's own effects", false,
                         "Also cancels the swings from sprinting and potions.");
@@ -92,24 +119,31 @@ class JavaDynamicFov final : public Module {
 public:
     JavaDynamicFov()
         : Module("java_dynamic_fov", "Dynamic FOV (Java)", ModuleCategory::Movement,
-                 "Widens the field of view while sprinting, like Java Edition.") {
+                 "Widens the field of view while sprinting, like Java Edition. Sprinting "
+                 "is judged from your speed.") {
+        markWaitingUnless("the FOV hook", FovHook::live);
+        markNeedsGame();
         settings.slider("sprintBoost", "Sprint effect", 1.15f, 1.f, 1.5f, "", "x");
         settings.slider("speed", "Transition speed", 8.f, 1.f, 30.f);
 
+        on(&JavaDynamicFov::onFrame);
         on(&JavaDynamicFov::onFov, EventPriority::Low);
         addKeywords({"fov", "sprint", "java", "dynamic"});
     }
 
+    void onEnable() override { factor_.set(1.f); }
+
 private:
-    void onFov(FovEvent& event) {
+    void onFrame(FrameEvent& event) {
         const auto& player = sdk::game().player();
 
         factor_.speed = settings.value<float>("speed", 8.f);
-        factor_.to(player.sprinting ? settings.value<float>("sprintBoost", 1.15f) : 1.f);
-        factor_.update(1.f / 60.f);
-
-        event.fov *= factor_.value;
+        factor_.to(player.valid && sprinting(player) ? settings.value<float>("sprintBoost", 1.15f)
+                                                     : 1.f);
+        factor_.update(event.deltaSeconds);
     }
+
+    void onFov(FovEvent& event) { event.fov *= factor_.value; }
 
     Animated factor_{1.f, 8.f};
 };
@@ -119,6 +153,7 @@ public:
     SensMultiplier()
         : Module("sens_multiplier", "Sensitivity multiplier", ModuleCategory::Movement,
                  "Tunes sensitivity beyond the game's own slider.") {
+        markWaitingUnless("the mouse hook", mouseHookReady);
         settings.slider("multiplier", "Multiplier", 1.f, 0.05f, 5.f, "", "x");
         settings.toggle("separateAxes", "Separate axes", false);
         settings.slider("horizontal", "Horizontal", 1.f, 0.05f, 5.f, "", "x");
@@ -186,6 +221,7 @@ public:
     ToggleSprint()
         : HeldKeyToggle("toggle_sprint", "Auto sprint",
                         "Keeps sprinting without holding the key.", VK_CONTROL) {
+        markNeedsGame();
         addKeywords({"sprint", "running", "autosprint"});
     }
 
@@ -201,6 +237,7 @@ public:
     ToggleSneak()
         : HeldKeyToggle("toggle_sneak", "Toggle sneak",
                         "Stays sneaking without holding the key.", VK_SHIFT) {
+        markNeedsGame();
         addKeywords({"sneak", "crouch", "shift"});
     }
 
@@ -212,34 +249,70 @@ class FreeLook final : public Module {
 public:
     FreeLook()
         : Module("free_look", "FreeLook", ModuleCategory::Movement,
-                 "Look around without changing where you are headed.") {
-        settings.toggle("thirdPerson", "Switch to third person", true);
+                 "Look around while the key is held; the view comes back to where it was "
+                 "the moment you let go.") {
+        // The way back is a turn of the exact opposite size. Through the game's own
+        // door that is degrees; through an input door it is counts, which land just as
+        // exactly because they go out and come back through the same constant.
+        markWaitingUnless("the mouse hook", mouseHookReady);
+        settings.toggle("thirdPerson", "Switch to third person", true,
+                        "Needs the perspective hook; without it the view stays as it is.");
         settings.slider("maxYaw", "Horizontal amount", 180.f, 45.f, 180.f, "", "°");
         settings.toggle("returnSmoothly", "Ease back", true);
+        settings.slider("returnDuration", "Return over", 0.15f, 0.02f, 0.6f, "", " s");
+
+        settings.find("returnDuration")->visibleWhen = [this] {
+            return settings.value<bool>("returnSmoothly", true);
+        };
 
         keybind() = Keybind{VK_MENU, false, false, false, Keybind::Mode::Hold};
 
-        on(&FreeLook::onTurn, EventPriority::High);
+        // Last in line, so what is recorded is what the game is about to apply, after
+        // every other module has had its say.
+        on(&FreeLook::onTurn, EventPriority::Last);
         on(&FreeLook::onPerspective);
+
+        // The way back runs after the key is up, which is after the module is off.
+        always(&FreeLook::onFrame);
         addKeywords({"freelook", "perspective", "camera"});
     }
 
     void onEnable() override {
-        const auto& player = sdk::game().player();
-        lockedYaw_ = player.yaw;
-        lockedPitch_ = player.pitch;
-        offsetYaw_ = 0.f;
-        offsetPitch_ = 0.f;
+        // Pressed again while the view was still on its way back: what is left of the
+        // way back is where the look-around now starts from.
+        offsetYaw_ = -pendingYaw_;
+        offsetPitch_ = -pendingPitch_;
+        pendingYaw_ = pendingPitch_ = 0.f;
+        elapsed_ = 0.f;
+    }
+
+    void onDisable() override {
+        pendingYaw_ = -offsetYaw_;
+        pendingPitch_ = -offsetPitch_;
+        offsetYaw_ = offsetPitch_ = 0.f;
+        elapsed_ = 0.f;
+
+        if (!settings.value<bool>("returnSmoothly", true)) {
+            turn::inject(pendingYaw_, pendingPitch_);
+            pendingYaw_ = pendingPitch_ = 0.f;
+        }
     }
 
 private:
     void onTurn(TurnDeltaEvent& event) {
+        if (inert() || event.cancelled) return;
+
+        // Held to the amount set: what would go past it is taken off the turn rather
+        // than remembered, so the way back never overshoots the amount either.
         const float maxYaw = settings.value<float>("maxYaw", 180.f);
+        const float yaw = clamp(offsetYaw_ + event.yaw, -maxYaw, maxYaw) - offsetYaw_;
+        event.yaw = yaw;
+        offsetYaw_ += yaw;
 
-        offsetYaw_ = clamp(offsetYaw_ + event.yaw, -maxYaw, maxYaw);
-        offsetPitch_ = clamp(offsetPitch_ + event.pitch, -89.f, 89.f);
-
-        event.cancel();
+        // The game clamps the pitch itself, at straight up and straight down, and says
+        // nothing about what it threw away. Kept within a turn and a half so that a
+        // look at the sky does not come back as a somersault.
+        offsetPitch_ = clamp(offsetPitch_ + event.pitch, -178.f, 178.f);
     }
 
     void onPerspective(PerspectiveEvent& event) {
@@ -248,10 +321,33 @@ private:
         }
     }
 
-    float lockedYaw_ = 0.f;
-    float lockedPitch_ = 0.f;
+    void onFrame(FrameEvent& event) {
+        if (std::abs(pendingYaw_) < 0.001f && std::abs(pendingPitch_) < 0.001f) return;
+
+        const float duration = std::max(0.02f, settings.value<float>("returnDuration", 0.15f));
+        elapsed_ = std::min(elapsed_ + event.deltaSeconds, duration);
+
+        float stepYaw = pendingYaw_ * (event.deltaSeconds / duration);
+        float stepPitch = pendingPitch_ * (event.deltaSeconds / duration);
+        pendingYaw_ -= stepYaw;
+        pendingPitch_ -= stepPitch;
+
+        // The last frame pays whatever the division left behind, rather than dropping
+        // it: a view that comes back four degrees short has not come back.
+        if (elapsed_ >= duration) {
+            stepYaw += pendingYaw_;
+            stepPitch += pendingPitch_;
+            pendingYaw_ = pendingPitch_ = 0.f;
+        }
+
+        turn::inject(stepYaw, stepPitch);
+    }
+
     float offsetYaw_ = 0.f;
     float offsetPitch_ = 0.f;
+    float pendingYaw_ = 0.f;
+    float pendingPitch_ = 0.f;
+    float elapsed_ = 0.f;
 };
 
 class SnapLook final : public Module {
@@ -259,10 +355,22 @@ public:
     SnapLook()
         : Module("snap_look", "SnapLook", ModuleCategory::Movement,
                  "Turns the camera by a fixed angle in one press.") {
+        markWaitingUnless("the mouse hook", mouseHookReady);
+        mutablePermissions().inputSynthesis = true;
+
         settings.slider("angle", "Angle", 180.f, 45.f, 180.f, "", "°");
         settings.slider("duration", "Duration", 0.12f, 0.f, 0.6f,
                         "0 = instant.", " s");
         settings.toggle("resetOnSecondPress", "Return on the second press", true);
+        settings.slider("calibration", "Calibration", 1.f, 0.1f, 5.f,
+                        "The turn is asked for in mouse movement, and how far that goes "
+                        "depends on the game's own sensitivity. Raise it if the turn "
+                        "falls short, lower it if it overshoots.",
+                        "x");
+
+        // Through the game's own door a degree asked for is a degree turned, and there
+        // is nothing to calibrate.
+        settings.find("calibration")->visibleWhen = [] { return !turn::exact(); };
 
         keybind() = Keybind{'V', false, false, false, Keybind::Mode::Once};
 
@@ -282,19 +390,27 @@ private:
 
         const float duration = settings.value<float>("duration", 0.12f);
 
-        TurnDeltaEvent turn;
+        float step = 0.f;
         if (duration <= 0.f) {
-            turn.yaw = pending_;
+            step = pending_;
             pending_ = 0.f;
         } else {
             elapsed_ = std::min(elapsed_ + event.deltaSeconds, duration);
-            const float step = pending_ * (event.deltaSeconds / duration);
-            turn.yaw = step;
+            step = pending_ * (event.deltaSeconds / duration);
             pending_ -= step;
-            if (elapsed_ >= duration) pending_ = 0.f;
+
+            // The last frame pays whatever the division left behind, rather than
+            // dropping it: an about-face that stops four degrees short is not one.
+            if (elapsed_ >= duration) {
+                step += pending_;
+                pending_ = 0.f;
+            }
         }
 
-        events().emit(turn);
+        // Asked for rather than emitted. A turn the player did not make has no business
+        // passing under their sensitivity multiplier on its way to the game.
+        const float scale = turn::exact() ? 1.f : settings.value<float>("calibration", 1.f);
+        turn::inject(step * scale, 0.f);
     }
 
     float pending_ = 0.f;
@@ -307,6 +423,7 @@ public:
     CinematicCamera()
         : Module("cinematic_camera", "Cinematic camera", ModuleCategory::Movement,
                  "Smooths camera movement for recording.") {
+        markWaitingUnless("the mouse hook", mouseHookReady);
         settings.slider("smoothing", "Smoothing", 0.75f, 0.05f, 0.98f);
         settings.toggle("rollOnStrafe", "Tilt while strafing", false);
         settings.slider("rollAmount", "Tilt amount", 4.f, 0.5f, 15.f, "", "°");
@@ -339,6 +456,12 @@ public:
     AutoPerspective()
         : Module("auto_perspective", "Automatic perspective", ModuleCategory::Movement,
                  "Switches view on its own depending on what you are doing.") {
+        // The perspective itself is answered for through the hook. What the player is
+        // doing — swimming, gliding, riding — is a flag no pack carries an offset for
+        // yet, and without it there is nothing to switch on.
+        markWaitingUnless("the perspective hook", PerspectiveHook::live);
+        markWaitingFor("the player's state flags");
+        markNeedsGame();
         settings.dropdown("onSwim", "While swimming", "None",
                           {"None", "First person", "Third person", "Third person front"});
         settings.dropdown("onElytra", "On elytra", "Third person",
@@ -361,6 +484,7 @@ private:
 
     void onPerspective(PerspectiveEvent& event) {
         const auto& player = sdk::game().player();
+        if (!player.valid) return;
 
         if (player.inWater) {
             event.perspective =

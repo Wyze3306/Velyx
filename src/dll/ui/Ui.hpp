@@ -70,6 +70,10 @@ public:
     bool iconButton(const UiId& id, const Rect& rect, std::string_view glyph,
                     const Color& tint = Color{});
 
+    // The way out of an interface, drawn rather than written: see the note by the
+    // implementation.
+    bool closeButton(const UiId& id, const Rect& rect);
+
     bool toggle(const UiId& id, const Rect& rect, bool& value);
 
     bool chip(const UiId& id, const Rect& rect, std::string_view label, bool selected);

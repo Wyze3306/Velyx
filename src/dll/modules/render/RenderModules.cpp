@@ -18,6 +18,7 @@ public:
     Crosshair()
         : HudModule("crosshair", "Crosshair", "A crosshair of your own: shape, colour and gap.",
                     {0.5f, 0.5f}, HudAnchor::Center) {
+        markNeedsGame();
         settings.set("background", SettingValue{false});
         settings.set("shadow", SettingValue{false});
         settings.set("padding", SettingValue{0.f});
@@ -180,7 +181,9 @@ private:
         return base + spread_.value * settings.value<float>("spread", 6.f) * scale();
     }
 
-    void onActorHurt(ActorHurtEvent& event) { hit_.set(1.f); }
+    void onActorHurt(ActorHurtEvent& event) {
+        if (event.byPlayer) hit_.set(1.f);
+    }
 
     Animated hit_{0.f, 12.f};
     Animated spread_{0.f, 10.f};

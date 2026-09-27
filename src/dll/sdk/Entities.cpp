@@ -59,21 +59,11 @@ ActorKind classify(int typeId, bool named) {
     return named ? ActorKind::Player : ActorKind::Unknown;
 }
 
+// A name is a name, not a payload: anything longer than a gamertag could ever be
+// says the offset is pointing at something else.
 std::string readNameTag(uintptr_t address) {
-    if (!address || !memory::readable(reinterpret_cast<const void*>(address), 32)) return {};
-
-    const auto size = memory::read<uint64_t>(address + 16);
-    const auto capacity = memory::read<uint64_t>(address + 24);
-
-    if (size == 0 || size > 256) return {};
-
-    if (capacity > 15) {
-        const auto data = memory::read<uintptr_t>(address);
-        if (!memory::readable(reinterpret_cast<const void*>(data), size)) return {};
-        return std::string(reinterpret_cast<const char*>(data), size);
-    }
-
-    return std::string(reinterpret_cast<const char*>(address), size);
+    std::string name = memory::readString(address);
+    return name.size() <= 256 ? name : std::string{};
 }
 
 }
@@ -109,6 +99,11 @@ bool Entities::readActor(uintptr_t address, Actor& out) const {
         std::abs(out.position.y) > 1.0e4f) {
         return false;
     }
+
+    // Exactly the origin is a field that was never written, not a place. On 1.26.51 the
+    // pack's position is a Player's alone, and a mob read through it sits at 0, 0, 0: a
+    // reach of eighty metres for a pig at arm's length, which is worse than no reach.
+    if (out.position.x == 0.f && out.position.y == 0.f && out.position.z == 0.f) return false;
 
     if (const int offset = sig::offset(names::kVelocity); offset >= 0) {
         out.velocity = memory::read<Vec3>(address + static_cast<uintptr_t>(offset));
@@ -150,6 +145,10 @@ bool Entities::readActor(uintptr_t address, Actor& out) const {
 
 // The list is a plain vector of pointers: first and last, eight bytes apart. Anything
 // that does not look like one is treated as no list at all rather than walked.
+bool Entities::packSeesActors() {
+    return sig::offset(names::kActorList) >= 0 && sig::offset(names::kPosition) >= 0;
+}
+
 bool Entities::readList() {
     const int offset = sig::offset(names::kActorList);
     const uintptr_t level = game().level();
@@ -242,6 +241,12 @@ const Actor* Entities::underCrosshair(float maxDistance, float coneDegrees) cons
     }
 
     return best;
+}
+
+bool Entities::read(uintptr_t address, Actor& out) const {
+    if (address == 0 || !readActor(address, out)) return false;
+    out.distance = out.centre().distanceTo(camera().origin());
+    return true;
 }
 
 const Actor* Entities::find(uintptr_t address) const {

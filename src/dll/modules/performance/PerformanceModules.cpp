@@ -17,9 +17,11 @@
 #include "core/Strings.hpp"
 #include "dll/Velyx.hpp"
 #include "dll/feature/Services.hpp"
+#include "dll/hook/hooks/SwapChainHook.hpp"
 #include "dll/hook/hooks/WindowHook.hpp"
 #include "dll/module/ModuleManager.hpp"
 #include "dll/modules/hud/TextHud.hpp"
+#include "dll/render/ComPtr.hpp"
 #include "dll/render/GraphicsContext.hpp"
 #include "dll/sdk/Game.hpp"
 #include "dll/ui/Notifications.hpp"
@@ -46,6 +48,60 @@ long long tickRate() {
 bool gameHasFocus() {
     const HWND window = WindowHook::window();
     return window == nullptr || GetForegroundWindow() == window;
+}
+
+// The display driver keeps a scheduler of its own, and gdi32 is where a client
+// reaches it. Nothing in the SDK headers declares these two, and inside an
+// AppContainer an export that is not there has to be a quiet no-op rather than a DLL
+// that will not load — so both are resolved by hand, once, on first use.
+enum : int {
+    kGpuPriorityNormal = 2,
+    kGpuPriorityHigh = 4,
+};
+
+bool readGpuPriority(int* current) {
+    using Fn = LONG(WINAPI*)(HANDLE, int*);
+    static const Fn read = reinterpret_cast<Fn>(reinterpret_cast<void*>(GetProcAddress(
+        GetModuleHandleW(L"gdi32.dll"), "D3DKMTGetProcessSchedulingPriorityClass")));
+    return read != nullptr && read(GetCurrentProcess(), current) == 0;
+}
+
+bool writeGpuPriority(int value) {
+    using Fn = LONG(WINAPI*)(HANDLE, int);
+    static const Fn write = reinterpret_cast<Fn>(reinterpret_cast<void*>(GetProcAddress(
+        GetModuleHandleW(L"gdi32.dll"), "D3DKMTSetProcessSchedulingPriorityClass")));
+    return write != nullptr && write(GetCurrentProcess(), value) == 0;
+}
+
+// avrt.dll is loaded rather than linked for the same reason: a machine or a container
+// without it should cost the setting, not the client.
+HMODULE multimediaScheduler() {
+    static const HMODULE library = LoadLibraryW(L"avrt.dll");
+    return library;
+}
+
+HANDLE joinGamesProfile() {
+    using Fn = HANDLE(WINAPI*)(LPCWSTR, LPDWORD);
+    const HMODULE library = multimediaScheduler();
+    if (library == nullptr) return nullptr;
+
+    static const Fn join = reinterpret_cast<Fn>(
+        reinterpret_cast<void*>(GetProcAddress(library, "AvSetMmThreadCharacteristicsW")));
+    if (join == nullptr) return nullptr;
+
+    DWORD index = 0;
+    HANDLE handle = join(L"Games", &index);
+    return handle == INVALID_HANDLE_VALUE ? nullptr : handle;
+}
+
+void leaveGamesProfile(HANDLE handle) {
+    using Fn = BOOL(WINAPI*)(HANDLE);
+    const HMODULE library = multimediaScheduler();
+    if (handle == nullptr || library == nullptr) return;
+
+    static const Fn leave = reinterpret_cast<Fn>(
+        reinterpret_cast<void*>(GetProcAddress(library, "AvRevertMmThreadCharacteristics")));
+    if (leave != nullptr) leave(handle);
 }
 
 int displayRefreshRate() {
@@ -270,7 +326,11 @@ private:
                 reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() +
                                                                                  offset);
             if (entry->Relationship == RelationProcessorCore) {
-                const BYTE efficiency = entry->Processor.EfficiencyClass;
+                // The byte after Flags. Older mingw headers still call it the first of
+                // Reserved[21], which is what the CI's Ubuntu ships, so it is read by
+                // position rather than by a name half the toolchains do not know.
+                const BYTE efficiency =
+                    reinterpret_cast<const BYTE*>(&entry->Processor)[sizeof(BYTE)];
                 if (efficiency != best && mask != 0) mixed = true;
 
                 if (efficiency > best) {
@@ -362,6 +422,215 @@ private:
     DWORD savedPriority_ = 0;
     DWORD_PTR savedAffinity_ = 0;
     bool raisedResolution_ = false;
+};
+
+// Between a click and the pixel that answers it, the display is the longest stretch,
+// and the least of it is the game's doing: DXGI queues frames ahead of the one on
+// screen, Windows schedules the drawing thread like any other, and the sync interval
+// is whatever the graphics menu last said. All three belong to the swapchain rather
+// than to the game, so none of this needs a signature or a byte of the game's memory.
+class Presentation final : public Module {
+public:
+    Presentation()
+        : Module("presentation", "Presentation", ModuleCategory::Utility,
+                 "Vertical sync, how many frames wait their turn, and how Windows schedules "
+                 "the thread that draws them.") {
+        mutablePermissions().system = true;
+
+        settings.header("Vertical sync");
+        settings.toggle("bypass", "Present without waiting", false,
+                        "Ignores the sync interval the game asked for, so the framerate stops "
+                        "being the refresh rate. Pair it with the frame limiter.");
+        settings.toggle("tearing", "Allow tearing", true,
+                        "Only where the swapchain was built to take it. Velyx asks rather than "
+                        "assumes, and says what the answer was.");
+
+        settings.header("Frame queue");
+        settings.intSlider("queue", "Frames in flight", 1, 1, 3,
+                           "Fewer frames waiting is less delay between the click and the "
+                           "screen. Not every swapchain lets this be set.");
+
+        settings.header("Scheduling");
+        settings.toggle("mmcss", "Multimedia scheduling", true,
+                        "Puts the drawing thread on the profile Windows keeps for games, where "
+                        "it stops queueing behind everything else on the machine.");
+        settings.toggle("gpuPriority", "Raise the graphics priority", true,
+                        "Asks the display driver to schedule this process ahead of the rest.");
+
+        settings.header("Reporting");
+        settings.toggle("notify", "Say what was applied", true);
+
+        settings.find("tearing")->visibleWhen = [this] {
+            return settings.value<bool>("bypass", false);
+        };
+
+        for (const char* id : {"bypass", "tearing", "queue", "mmcss", "gpuPriority"}) {
+            settings.find(id)->onChange = [this] { dirty_ = true; };
+        }
+
+        // Everything here happens on the thread that presents, and what the multimedia
+        // scheduler hands out has to be given back on the thread that took it. So the
+        // frame is watched whether the module is on or off: the frame applies, and the
+        // frame undoes.
+        always(&Presentation::onFrame, EventPriority::First);
+        addKeywords({"vsync", "tearing", "latency", "input", "delay", "present", "queue",
+                     "mmcss", "gpu", "fps"});
+    }
+
+    void onEnable() override { dirty_ = true; }
+    void onDisable() override { dirty_ = true; }
+
+private:
+    void onFrame(FrameEvent&) {
+        if (!dirty_) return;
+        dirty_ = false;
+
+        if (enabled()) {
+            apply();
+        } else {
+            restore();
+        }
+    }
+
+    void apply() {
+        std::vector<std::string> applied;
+        std::vector<std::string> refused;
+
+        applyVsync(applied, refused);
+        applyQueue(applied, refused);
+        applyScheduling(applied, refused);
+
+        if (!settings.value<bool>("notify", true)) return;
+
+        if (!refused.empty()) {
+            Notifications::warning("Presentation",
+                                   "This machine would not take " + strings::join(refused, ", "));
+        }
+        if (!applied.empty()) Notifications::success("Presentation", strings::join(applied, ", "));
+    }
+
+    void applyVsync(std::vector<std::string>& applied, std::vector<std::string>& refused) {
+        const bool bypass = settings.value<bool>("bypass", false);
+        const bool tearing = settings.value<bool>("tearing", true);
+
+        SwapChainHook::setPresentation({bypass, tearing});
+        if (!bypass) return;
+
+        applied.emplace_back("vsync bypassed");
+
+        SwapChainHook::probeTearing();
+        if (tearing && !SwapChainHook::tearingAvailable()) refused.emplace_back("tearing");
+    }
+
+    // Two objects can own the queue depth and neither is guaranteed: a swapchain only
+    // answers if it was created waitable, and a D3D12 device has no IDXGIDevice behind
+    // it to fall back on. Both are asked, in that order, and what the old depth was is
+    // kept from whichever answered so that disabling puts it back rather than guessing
+    // at a default.
+    void applyQueue(std::vector<std::string>& applied, std::vector<std::string>& refused) {
+        IDXGISwapChain* swapChain = SwapChainHook::lastPresented();
+        if (swapChain == nullptr) return;
+
+        const auto depth = static_cast<UINT>(settings.value<int>("queue", 1));
+
+        ComPtr<IDXGISwapChain2> waitable;
+        if (SUCCEEDED(swapChain->QueryInterface(__uuidof(IDXGISwapChain2),
+                                                reinterpret_cast<void**>(waitable.put())))) {
+            if (savedQueue_ == 0) waitable->GetMaximumFrameLatency(&savedQueue_);
+            if (SUCCEEDED(waitable->SetMaximumFrameLatency(depth))) {
+                queueHeldBySwapChain_ = true;
+                applied.push_back(std::format("{} frame{} in flight", depth,
+                                              depth == 1 ? "" : "s"));
+                return;
+            }
+        }
+
+        ComPtr<IDXGIDevice1> device;
+        if (SUCCEEDED(swapChain->GetDevice(__uuidof(IDXGIDevice1),
+                                           reinterpret_cast<void**>(device.put())))) {
+            if (savedQueue_ == 0) device->GetMaximumFrameLatency(&savedQueue_);
+            if (SUCCEEDED(device->SetMaximumFrameLatency(depth))) {
+                queueHeldBySwapChain_ = false;
+                applied.push_back(std::format("{} frame{} in flight", depth,
+                                              depth == 1 ? "" : "s"));
+                return;
+            }
+        }
+
+        refused.emplace_back("a shorter frame queue");
+    }
+
+    void applyScheduling(std::vector<std::string>& applied, std::vector<std::string>& refused) {
+        const bool wantsProfile = settings.value<bool>("mmcss", true);
+        if (wantsProfile && profile_ == nullptr) {
+            profile_ = joinGamesProfile();
+            if (profile_ != nullptr) {
+                applied.emplace_back("multimedia scheduling");
+            } else {
+                refused.emplace_back("multimedia scheduling");
+            }
+        } else if (!wantsProfile && profile_ != nullptr) {
+            leaveGamesProfile(profile_);
+            profile_ = nullptr;
+        }
+
+        const bool wantsPriority = settings.value<bool>("gpuPriority", true);
+        if (wantsPriority && !raisedGpu_) {
+            if (savedGpu_ < 0 && !readGpuPriority(&savedGpu_)) savedGpu_ = kGpuPriorityNormal;
+
+            if (writeGpuPriority(kGpuPriorityHigh)) {
+                raisedGpu_ = true;
+                applied.emplace_back("graphics priority");
+            } else {
+                refused.emplace_back("a raised graphics priority");
+            }
+        } else if (!wantsPriority && raisedGpu_) {
+            writeGpuPriority(savedGpu_);
+            raisedGpu_ = false;
+        }
+    }
+
+    void restore() {
+        SwapChainHook::setPresentation({});
+
+        if (savedQueue_ != 0) {
+            IDXGISwapChain* swapChain = SwapChainHook::lastPresented();
+            if (swapChain != nullptr && queueHeldBySwapChain_) {
+                ComPtr<IDXGISwapChain2> waitable;
+                if (SUCCEEDED(swapChain->QueryInterface(__uuidof(IDXGISwapChain2),
+                                                        reinterpret_cast<void**>(waitable.put())))) {
+                    waitable->SetMaximumFrameLatency(savedQueue_);
+                }
+            } else if (swapChain != nullptr) {
+                ComPtr<IDXGIDevice1> device;
+                if (SUCCEEDED(swapChain->GetDevice(__uuidof(IDXGIDevice1),
+                                                   reinterpret_cast<void**>(device.put())))) {
+                    device->SetMaximumFrameLatency(savedQueue_);
+                }
+            }
+            savedQueue_ = 0;
+        }
+
+        if (profile_ != nullptr) {
+            leaveGamesProfile(profile_);
+            profile_ = nullptr;
+        }
+
+        if (raisedGpu_) {
+            writeGpuPriority(savedGpu_ < 0 ? kGpuPriorityNormal : savedGpu_);
+            raisedGpu_ = false;
+        }
+    }
+
+    bool dirty_ = false;
+
+    UINT savedQueue_ = 0;
+    bool queueHeldBySwapChain_ = false;
+
+    HANDLE profile_ = nullptr;
+
+    int savedGpu_ = -1;
+    bool raisedGpu_ = false;
 };
 
 // What the process actually costs, from the two places that know: Windows for the
@@ -622,6 +891,7 @@ private:
 
 void registerPerformanceModules(ModuleManager& manager) {
     manager.add<FrameLimiter>();
+    manager.add<Presentation>();
     manager.add<ProcessTuner>();
     manager.add<SystemMonitorHud>();
     manager.add<OverlayCost>();

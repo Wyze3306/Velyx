@@ -66,8 +66,6 @@ private:
     std::string newProfileName_;
 
     Animated open_{0.f, 14.f};
-    Vec2 dragOffset_;
-    bool dragging_ = false;
     bool showAdvanced_ = false;
 };
 

@@ -8,6 +8,7 @@
 
 #include "core/Log.hpp"
 #include "core/Paths.hpp"
+#include "dll/event/Events.hpp"
 
 namespace velyx {
 namespace {
@@ -80,14 +81,59 @@ void Playtime::save() const {
     if (stream) stream << document.dump(1, '\t');
 }
 
-void Playtime::add(long long seconds) {
+void Playtime::bind() {
+    pendingDay_ = todayKey();
+
+    events().on<FrameEvent>(this, &Playtime::onFrame, EventPriority::Last);
+    events().on<GameClosingEvent>(this, &Playtime::onGameClosing, EventPriority::First);
+}
+
+void Playtime::onFrame(FrameEvent& event) {
+    // A frame that took a quarter of a second is the overlay being rebuilt, not a
+    // quarter second of play; the delta is already clamped there, and this is the
+    // second place it would be believed.
+    if (event.deltaSeconds <= 0.f || event.deltaSeconds > 1.f) return;
+
+    // Midnight: what has been counted so far belongs to the day it was played on.
+    if (const std::string key = todayKey(); key != pendingDay_) {
+        commit();
+        pendingDay_ = key;
+    }
+
+    pendingSeconds_ += event.deltaSeconds;
+    sinceCommit_ += event.deltaSeconds;
+
+    // Often enough that a crash costs a minute, rarely enough that the file is not
+    // written on the render thread every second.
+    if (sinceCommit_ >= 60.f) commit();
+}
+
+void Playtime::onGameClosing(GameClosingEvent&) { commit(); }
+
+void Playtime::commit() {
+    sinceCommit_ = 0.f;
+
+    const auto whole = static_cast<long long>(pendingSeconds_);
+    if (whole <= 0) return;
+
+    pendingSeconds_ -= static_cast<float>(whole);
+    addOn(pendingDay_, whole);
+}
+
+long long Playtime::uncommitted() const { return static_cast<long long>(pendingSeconds_); }
+
+void Playtime::add(long long seconds) { addOn(todayKey(), seconds); }
+
+void Playtime::addOn(const std::string& key, long long seconds) {
     if (seconds <= 0) return;
 
-    const std::string key = todayKey();
     const auto it = std::ranges::find_if(days_, [&](const PlaytimeDay& d) { return d.date == key; });
 
     if (it == days_.end()) {
         days_.push_back(PlaytimeDay{key, seconds});
+        std::ranges::sort(days_, [](const PlaytimeDay& a, const PlaytimeDay& b) {
+            return a.date < b.date;
+        });
     } else {
         it->seconds += seconds;
     }
@@ -98,17 +144,17 @@ void Playtime::add(long long seconds) {
 long long Playtime::today() const {
     const std::string key = todayKey();
     const auto it = std::ranges::find_if(days_, [&](const PlaytimeDay& d) { return d.date == key; });
-    return it == days_.end() ? 0 : it->seconds;
+    return (it == days_.end() ? 0 : it->seconds) + uncommitted();
 }
 
 long long Playtime::thisWeek() const {
-    long long sum = 0;
+    long long sum = uncommitted();
     for (const PlaytimeDay& day : lastDays(7)) sum += day.seconds;
     return sum;
 }
 
 long long Playtime::total() const {
-    long long sum = 0;
+    long long sum = uncommitted();
     for (const PlaytimeDay& day : days_) sum += day.seconds;
     return sum;
 }

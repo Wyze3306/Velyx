@@ -57,8 +57,8 @@ void ClientConfig::load() {
     }
     onboardingCompleted = json.value("onboardingCompleted", onboardingCompleted);
     telemetry = json.value("telemetry", telemetry);
-    suspendGame = json.value("suspendGame", suspendGame);
     cleanShutdown = json.value("cleanShutdown", true);
+    faulted = json.value("faulted", false);
     crashStreak = json.value("crashStreak", 0);
     lastCrashModule = json.value("lastCrashModule", std::string{});
     lastCrashReason = json.value("lastCrashReason", std::string{});
@@ -75,6 +75,7 @@ void ClientConfig::load() {
                                         instantReplayKey);
         screenshotKey = bindFromJson(keys.value("screenshot", nlohmann::json{}), screenshotKey);
         clipMarkerKey = bindFromJson(keys.value("clipMarker", nlohmann::json{}), clipMarkerKey);
+        gameChatKey = bindFromJson(keys.value("gameChat", nlohmann::json{}), gameChatKey);
     }
 }
 
@@ -88,8 +89,8 @@ void ClientConfig::save() const {
     json["interface"] = interfaceState;
     json["onboardingCompleted"] = onboardingCompleted;
     json["telemetry"] = telemetry;
-    json["suspendGame"] = suspendGame;
     json["cleanShutdown"] = cleanShutdown;
+    json["faulted"] = faulted;
     json["crashStreak"] = crashStreak;
     json["lastCrashModule"] = lastCrashModule;
     json["lastCrashReason"] = lastCrashReason;
@@ -101,6 +102,7 @@ void ClientConfig::save() const {
     keys["instantReplay"] = bindToJson(instantReplayKey);
     keys["screenshot"] = bindToJson(screenshotKey);
     keys["clipMarker"] = bindToJson(clipMarkerKey);
+    keys["gameChat"] = bindToJson(gameChatKey);
 
     std::error_code ec;
     std::filesystem::create_directories(Paths::config(), ec);
@@ -114,22 +116,35 @@ void ClientConfig::save() const {
 }
 
 void ClientConfig::markSessionStarted() {
-    if (!cleanShutdown) {
-
+    // An unclean exit is not a crash. A process that is killed leaves the flag exactly
+    // as a fault would, and killing the game is how an ordinary session ends under a
+    // launcher that does it that way, or under alt-F4 on any machine. Counting those
+    // put the client in safe mode after two normal sessions and never let it out,
+    // which from the menu looks like sixty broken modules rather than one guard.
+    //
+    // What a crash actually looks like is the handler having recorded a fault. Missing
+    // one too violent to record costs a safe mode nobody asked for; counting every kill
+    // as a fault costs the client itself.
+    if (faulted) {
         ++crashStreak;
-        Log::warn(kLog, "the previous session ended abnormally (streak: {})",
-                  crashStreak);
+        Log::warn(kLog, "the previous session recorded a fault (streak: {})", crashStreak);
     } else {
+        if (!cleanShutdown) {
+            Log::info(kLog, "the previous session ended without a goodbye, but recorded "
+                            "no fault; not counted");
+        }
         crashStreak = 0;
     }
 
+    faulted = false;
     cleanShutdown = false;
     save();
 }
 
+// Deliberately not touching the streak: whether the last session faulted is decided in
+// one place, at the next start, so a fault survived mid-session still counts.
 void ClientConfig::markSessionEnded() {
     cleanShutdown = true;
-    crashStreak = 0;
     save();
 }
 

@@ -1,14 +1,77 @@
 #include "ModuleManager.hpp"
 
 #include <algorithm>
+#include <atomic>
 
 #include "core/Lang.hpp"
 #include "core/Log.hpp"
 #include "core/Strings.hpp"
+#include "dll/config/ClientConfig.hpp"
+#include "dll/hook/hooks/UserInputHook.hpp"
+#include "dll/hook/hooks/WindowHook.hpp"
+#include "dll/sdk/Game.hpp"
 
 namespace velyx {
 namespace {
+
 constexpr const char* kLog = "Modules";
+
+// Whether the game has a line of text open in front of the player — its chat, most of
+// the time. A module bound to a plain letter has no business firing while a message is
+// being written, and the letter has every business reaching the game.
+//
+// The game's own screen name is the answer whenever the pack carries the offset that
+// reads it. Without it the chat is followed from the keys that open and close it,
+// which is not proof but covers the way it actually happens.
+std::atomic<bool> g_chatOpen{false};
+
+bool typesACharacter(int key) {
+    if (key >= '0' && key <= '9') return true;
+    if (key >= 'A' && key <= 'Z') return true;
+    if (key == VK_SPACE) return true;
+    if (key >= VK_NUMPAD0 && key <= VK_DIVIDE) return true;
+    if (key >= VK_OEM_1 && key <= VK_OEM_3) return true;
+    if (key >= VK_OEM_4 && key <= VK_OEM_8) return true;
+    return key == VK_OEM_102 || key == VK_OEM_PLUS || key == VK_OEM_COMMA ||
+           key == VK_OEM_MINUS || key == VK_OEM_PERIOD;
+}
+
+// Ctrl and Alt are what tell a shortcut apart from a keystroke, so a bind carrying
+// either still answers while the chat is open — as does anything that writes nothing
+// at all, Insert and the function keys included.
+bool wouldType(const Keybind& bind) {
+    return !bind.ctrl && !bind.alt && typesACharacter(bind.key);
+}
+
+bool gameIsTyping() {
+    // With an interface open the keyboard is the client's, and the game is not
+    // reading a thing.
+    if (WindowHook::captureInput()) return false;
+
+    if (const sdk::Game& game = sdk::game(); game.screenKnown()) {
+        // The game's own answer, and it puts the guess below back on its feet too.
+        const bool chat = game.chatOnScreen();
+        g_chatOpen.store(chat, std::memory_order_relaxed);
+        return chat;
+    }
+
+    return g_chatOpen.load(std::memory_order_relaxed);
+}
+
+void followGameChat(const KeyEvent& event) {
+    if (!event.down || event.repeat || WindowHook::captureInput()) return;
+
+    if (event.key == VK_RETURN || event.key == VK_ESCAPE) {
+        g_chatOpen.store(false, std::memory_order_relaxed);
+        return;
+    }
+
+    const Keybind& chat = config().gameChatKey;
+    if (chat.bound() && event.key == chat.key && !event.ctrl && !event.alt) {
+        g_chatOpen.store(true, std::memory_order_relaxed);
+    }
+}
+
 }
 
 ModuleManager& ModuleManager::get() {
@@ -34,6 +97,16 @@ void ModuleManager::initialize() {
     // the open interface first — it cancels the keys it consumes.
     events().on<KeyEvent>([this](KeyEvent& event) { handleKey(event); }, EventPriority::Low,
                           this);
+
+    // The other way into the chat, and the one a keyboard layout cannot spoil: whatever
+    // key carries it, a typed slash opens the game's command line.
+    events().on<CharEvent>(
+        [](CharEvent& event) {
+            if (event.codepoint == '/' && !WindowHook::captureInput()) {
+                g_chatOpen.store(true, std::memory_order_relaxed);
+            }
+        },
+        EventPriority::Low, this);
 
     Log::info(kLog, "registered {} modules ({} HUD elements)", modules_.size(), hudCount);
 }
@@ -156,7 +229,29 @@ bool ModuleManager::anyInterfaceOpen() const {
     });
 }
 
+namespace {
+
+// Whether the modifiers held match the ones the bind asks for. A bind on a modifier
+// itself — FreeLook on Alt — is pressed with that modifier down by definition, so that
+// one is not compared: asked to be Alt without Alt, it could never fire.
+bool modifiersMatch(const Keybind& bind, const KeyEvent& event) {
+    const bool onCtrl = bind.key == VK_CONTROL || bind.key == VK_LCONTROL || bind.key == VK_RCONTROL;
+    const bool onShift = bind.key == VK_SHIFT || bind.key == VK_LSHIFT || bind.key == VK_RSHIFT;
+    const bool onAlt = bind.key == VK_MENU || bind.key == VK_LMENU || bind.key == VK_RMENU;
+
+    return (onCtrl || bind.ctrl == event.ctrl) && (onShift || bind.shift == event.shift) &&
+           (onAlt || bind.alt == event.alt);
+}
+
+}
+
 void ModuleManager::handleKey(KeyEvent& event) {
+    followGameChat(event);
+
+    // Only what is being pressed is held back. A release always goes through, or a
+    // module held down when the chat opened would have no way of letting go.
+    const bool typing = event.down && gameIsTyping();
+
     // A key the client answers to is the client's. Left uncancelled it also reaches
     // the game, which is how Ctrl+K opened the menu and made the game act on the
     // keystroke behind it.
@@ -166,9 +261,8 @@ void ModuleManager::handleKey(KeyEvent& event) {
         for (const Shortcut& shortcut : shortcuts_) {
             const Keybind& bind = *shortcut.bind;
             if (!bind.bound() || bind.key != event.key) continue;
-            if (bind.ctrl != event.ctrl || bind.shift != event.shift || bind.alt != event.alt) {
-                continue;
-            }
+            if (typing && wouldType(bind)) continue;
+            if (!modifiersMatch(bind, event)) continue;
 
             Log::debug(kLog, "shortcut fired for key {}{}", event.ctrl ? "ctrl+" : "", event.key);
             shortcut.action();
@@ -180,7 +274,9 @@ void ModuleManager::handleKey(KeyEvent& event) {
         const Keybind& bind = module->keybind();
         if (!bind.bound() || bind.key != event.key) continue;
 
-        if (bind.ctrl != event.ctrl || bind.shift != event.shift || bind.alt != event.alt) continue;
+        if (!modifiersMatch(bind, event)) continue;
+
+        if (typing && wouldType(bind)) continue;
 
         if (safeMode_ && !module->essential()) continue;
 
@@ -193,7 +289,16 @@ void ModuleManager::handleKey(KeyEvent& event) {
                 }
                 break;
             case Keybind::Mode::Hold:
-                requestEnabled(module.get(), event.down);
+                if (event.down) {
+                    requestEnabled(module.get(), true);
+                    const std::lock_guard<std::mutex> guard(pendingMutex_);
+                    std::erase_if(pendingReleases_, [&](const auto& release) {
+                        return release.first == module.get();
+                    });
+                } else {
+                    const std::lock_guard<std::mutex> guard(pendingMutex_);
+                    pendingReleases_.emplace_back(module.get(), event.key);
+                }
                 break;
             case Keybind::Mode::Once:
                 if (event.down && !event.repeat) {
@@ -220,15 +325,23 @@ void ModuleManager::requestEnabled(Module* module, bool enabled) {
 
 void ModuleManager::applyPendingToggles() {
     std::vector<std::pair<Module*, bool>> pending;
+    std::vector<std::pair<Module*, int>> releases;
     {
         const std::lock_guard<std::mutex> guard(pendingMutex_);
-        if (pendingToggles_.empty()) return;
         pending.swap(pendingToggles_);
+        releases.swap(pendingReleases_);
     }
 
     for (const auto& [module, enabled] : pending) {
         if (safeMode_ && !module->essential() && enabled) continue;
         module->setEnabled(enabled);
+    }
+
+    // A release the system still calls a press was the key repeating, not the player
+    // letting go; the real release comes as a key-up of its own.
+    for (const auto& [module, key] : releases) {
+        if ((UserInputHook::realAsyncKeyState(key) & 0x8000) != 0) continue;
+        module->setEnabled(false);
     }
 }
 

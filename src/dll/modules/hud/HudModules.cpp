@@ -10,6 +10,7 @@
 
 #include "core/Strings.hpp"
 #include "dll/Velyx.hpp"
+#include "dll/feature/NetworkMonitor.hpp"
 #include "dll/feature/Services.hpp"
 #include "dll/hook/hooks/WindowHook.hpp"
 #include "dll/module/ModuleManager.hpp"
@@ -167,6 +168,7 @@ public:
     CoordinatesHud()
         : TextHud("coordinates", "Coordinates", "Position, dimension and facing.",
                   {0.01f, 0.97f}, HudAnchor::BottomLeft) {
+        markNeedsGame();
         addTextSettings(true);
 
         settings.header("Display");
@@ -230,6 +232,7 @@ public:
     DirectionHud()
         : TextHud("direction", "Direction", "A compass, in text.",
                   {0.5f, 0.03f}, HudAnchor::TopCenter) {
+        markNeedsGame();
         addTextSettings(false);
 
         settings.header("Display");
@@ -262,6 +265,7 @@ public:
     SpeedHud()
         : TextHud("speed", "Speed", "Horizontal speed in blocks per second.",
                   {0.01f, 0.14f}, HudAnchor::TopLeft) {
+        markNeedsGame();
         addTextSettings(true);
 
         settings.header("Unit");
@@ -291,11 +295,33 @@ public:
     }
 };
 
+// The probe both readouts below lean on is held rather than switched: each of them
+// asks for it while it is on screen and lets go when it is not, so two of them on at
+// once means one probe, and the last one off is the one that stops it.
+class ProbeHolder {
+public:
+    void want(bool probing) {
+        if (probing == holding_) return;
+        holding_ = probing;
+
+        if (probing) {
+            NetworkMonitor::get().acquireProbe();
+        } else {
+            NetworkMonitor::get().releaseProbe();
+        }
+    }
+
+private:
+    bool holding_ = false;
+};
+
 class PingHud final : public TextHud {
 public:
     PingHud()
-        : TextHud("ping", "Ping", "Latency to the server.",
+        : TextHud("ping", "Ping", "Latency to the server, measured here when the game will not say.",
                   {0.99f, 0.08f}, HudAnchor::TopRight) {
+        markNeedsGame();
+        mutablePermissions().network = true;
         addTextSettings(true);
 
         settings.header("Thresholds");
@@ -303,13 +329,41 @@ public:
         settings.intSlider("warnAbove", "Amber threshold", 100, 20, 500, "", " ms");
         settings.intSlider("badAbove", "Red threshold", 200, 50, 1000, "", " ms");
 
-        addKeywords({"ping", "latency", "ms", "network"});
+        settings.header("Measuring");
+        settings.toggle("measure", "Measure it here", true,
+                        "Sends the server the same unconnected ping the server list sends, once "
+                        "a second, and times the answer. Needs no signature pack, and is what "
+                        "stands in when the game has no figure to give.");
+
+        settings.find("measure")->onChange = [this] { applyProbe(); };
+
+        addKeywords({"ping", "latency", "ms", "network", "rtt"});
     }
 
-    bool relevantNow() const override { return sdk::game().world().multiplayer; }
+    void onEnable() override {
+        NetworkMonitor::get().acquire();
+        applyProbe();
+    }
+
+    void onDisable() override {
+        probe_.want(false);
+        NetworkMonitor::get().release();
+    }
+
+    bool relevantNow() const override {
+        return sdk::game().world().multiplayer || NetworkMonitor::get().connected();
+    }
 
     std::vector<Row> rows() override {
-        const float ping = sdk::game().world().ping;
+        // The game's own figure comes first where a signature pack provides one: that
+        // is the session's view of the round trip, and the probe is only standing in
+        // for it, never correcting it.
+        float ping = sdk::game().world().ping;
+        if (ping < 0.f) {
+            const NetworkStats measured = NetworkMonitor::get().stats();
+            if (measured.probeAnswered) ping = measured.ping;
+        }
+
         if (ping < 0.f) return {Row{"Ping", kUnknown, {}}};
 
         Color color{};
@@ -326,6 +380,11 @@ public:
 
         return {Row{"Ping", std::format("{} ms", static_cast<int>(ping)), color}};
     }
+
+private:
+    void applyProbe() { probe_.want(enabled() && settings.value<bool>("measure", true)); }
+
+    ProbeHolder probe_;
 };
 
 class MemoryHud final : public TextHud {
@@ -364,6 +423,7 @@ public:
     IpDisplayHud()
         : TextHud("ip_display", "Server address", "The server you are on, hideable for a stream.",
                   {0.5f, 0.97f}, HudAnchor::BottomCenter) {
+        markNeedsGame();
         addTextSettings(false);
         addKeywords({"ip", "server", "address"});
     }
@@ -408,6 +468,7 @@ public:
         : TextHud("session_stats", "Session stats",
                   "Duration, distance travelled, kills and average FPS.",
                   {0.99f, 0.4f}, HudAnchor::MiddleRight) {
+        markNeedsGame();
         addTextSettings(true);
 
         settings.header("Lines shown");
@@ -724,66 +785,174 @@ public:
     }
 };
 
+// Everything a connection can be wrong in, told apart. A steady two hundred and a
+// jumpy forty read the same on a ping readout and mean opposite things: one is
+// distance, which nothing on this machine can shorten, and the other is a line that
+// is dropping and stalling, which is worth doing something about. The stalls and the
+// traffic are counted off the datagrams themselves and survive a server that ignores
+// probes; the round trip and the loss come from the probe and say so when they cannot.
 class ServerMonitorHud final : public TextHud {
 public:
     ServerMonitorHud()
         : TextHud("server_monitor", "Server monitor",
-                  "Ping, estimated TPS, packet loss and stability.",
+                  "Round trip, jitter, loss, stalls and what the connection is carrying.",
                   {0.99f, 0.2f}, HudAnchor::TopRight) {
+        markNeedsGame();
+        mutablePermissions().network = true;
         addTextSettings(true);
 
         settings.header("Lines shown");
-        settings.toggle("showPing", "Ping", true);
-        settings.toggle("showTps", "Estimated TPS", true);
+        settings.toggle("showPing", "Round trip", true);
+        settings.toggle("showJitter", "Jitter", true);
         settings.toggle("showLoss", "Packet loss", true);
-        settings.toggle("showStability", "Stability", true);
+        settings.toggle("showStalls", "Stalls", true);
+        settings.toggle("showTraffic", "Traffic", false);
+        settings.toggle("showPlayers", "Players online", false);
+        settings.toggle("showStability", "Verdict", true);
 
-        addKeywords({"tps", "server", "network", "lag", "paquets"});
+        settings.header("Measuring");
+        settings.toggle("measure", "Probe the server", true,
+                        "One unconnected ping a second, the same one the server list sends. "
+                        "Without it only the stalls and the traffic can be measured.");
+        settings.slider("interval", "Probe every", 1.f, 0.25f, 5.f, "", " s");
+        settings.slider("stallAbove", "Count a silence over", 200.f, 50.f, 2000.f, "", " ms");
+
+        settings.find("measure")->onChange = [this] { applyProbe(); };
+        settings.find("interval")->onChange = [this] { applySettings(); };
+        settings.find("stallAbove")->onChange = [this] { applySettings(); };
+
+        settings.find("interval")->visibleWhen = [this] {
+            return settings.value<bool>("measure", true);
+        };
+
+        addKeywords({"server", "network", "lag", "jitter", "loss", "stall", "packets", "ping"});
     }
 
-    bool relevantNow() const override { return sdk::game().world().multiplayer; }
+    void onEnable() override {
+        NetworkMonitor::get().acquire();
+        applySettings();
+        applyProbe();
+    }
+
+    void onDisable() override {
+        probe_.want(false);
+        NetworkMonitor::get().release();
+    }
+
+    bool relevantNow() const override {
+        return sdk::game().world().multiplayer || NetworkMonitor::get().connected();
+    }
 
     std::vector<Row> rows() override {
-        const auto& world = sdk::game().world();
+        const NetworkStats measured = NetworkMonitor::get().stats();
         const auto& active = theme();
 
         std::vector<Row> result;
 
+        const float ping = pingOf(measured);
+
         if (settings.value<bool>("showPing", true)) {
             result.push_back(Row{"Ping",
-                                 world.ping >= 0.f ? std::format("{} ms",
-                                                                 static_cast<int>(world.ping))
-                                                   : kUnknown,
-                                 {}});
+                                 ping < 0.f ? kUnknown : std::format("{} ms", static_cast<int>(ping)),
+                                 ping < 0.f            ? Color{}
+                                 : ping > 200.f        ? active.warning
+                                                       : active.success});
         }
 
-        if (settings.value<bool>("showTps", true)) {
-            if (world.tps < 0.f) {
-                result.push_back(Row{"TPS", kUnknown, {}});
-            } else {
-                const Color color = world.tps >= 19.f   ? active.success
-                                    : world.tps >= 15.f ? active.warning
-                                                        : active.danger;
-                result.push_back(Row{"TPS", strings::formatFloat(world.tps, 1), color});
-            }
+        if (settings.value<bool>("showJitter", true)) {
+            const Color color = measured.jitter < 0.f  ? Color{}
+                                : measured.jitter > 30.f ? active.danger
+                                : measured.jitter > 12.f ? active.warning
+                                                         : active.success;
+            result.push_back(Row{"Jitter",
+                                 measured.jitter < 0.f
+                                     ? kUnknown
+                                     : std::format("{} ms", static_cast<int>(measured.jitter)),
+                                 color});
         }
 
         if (settings.value<bool>("showLoss", true)) {
+            // A server that has never answered a probe is not losing packets; it is a
+            // server the probe cannot reach, which is a different thing and is said so.
             result.push_back(Row{"Loss",
-                                 std::format("{} %", strings::formatFloat(world.packetLoss * 100.f, 1)),
-                                 world.packetLoss > 0.02f ? active.danger : Color{}});
+                                 measured.loss < 0.f
+                                     ? (measured.connected ? "no answer" : kUnknown)
+                                     : std::format("{} %",
+                                                   strings::formatFloat(measured.loss * 100.f, 1)),
+                                 measured.loss > 0.02f ? active.danger : Color{}});
+        }
+
+        if (settings.value<bool>("showStalls", true)) {
+            const Color color = measured.stalls >= 3   ? active.danger
+                                : measured.stalls >= 1 ? active.warning
+                                                       : Color{};
+            result.push_back(Row{"Stalls",
+                                 measured.worstGap < 0.f
+                                     ? std::format("{}", measured.stalls)
+                                     : std::format("{}  worst {} ms", measured.stalls,
+                                                   static_cast<int>(measured.worstGap)),
+                                 color});
+        }
+
+        if (settings.value<bool>("showTraffic", false)) {
+            result.push_back(Row{"In", std::format("{}/s  {} KiB/s",
+                                                   static_cast<int>(measured.inboundPerSecond),
+                                                   strings::formatFloat(
+                                                       measured.inboundKibPerSecond, 1)),
+                                 {}});
+            result.push_back(Row{"Out", std::format("{}/s  {} KiB/s",
+                                                    static_cast<int>(measured.outboundPerSecond),
+                                                    strings::formatFloat(
+                                                        measured.outboundKibPerSecond, 1)),
+                                 {}});
+        }
+
+        if (settings.value<bool>("showPlayers", false)) {
+            result.push_back(Row{"Players",
+                                 measured.playersOnline < 0
+                                     ? kUnknown
+                                     : std::format("{} / {}", measured.playersOnline,
+                                                   measured.playerLimit),
+                                 {}});
         }
 
         if (settings.value<bool>("showStability", true)) {
-            const char* label = world.ping < 0.f            ? kUnknown
-                                : world.packetLoss > 0.05f  ? "Unstable"
-                                : world.ping > 200.f        ? "Average"
-                                                            : "Good";
-            result.push_back(Row{"Connection", label, {}});
+            const auto [label, color] = verdict(measured, ping, active);
+            result.push_back(Row{"Connection", label, color});
         }
 
         return result;
     }
+
+private:
+    static float pingOf(const NetworkStats& measured) {
+        const float reported = sdk::game().world().ping;
+        if (reported >= 0.f) return reported;
+        return measured.probeAnswered ? measured.ping : -1.f;
+    }
+
+    // The order matters more than the wording: what is worth naming is whichever fault
+    // the player can act on, and distance is the only one on the list that they cannot.
+    static std::pair<const char*, Color> verdict(const NetworkStats& measured, float ping,
+                                                 const Theme& active) {
+        if (!measured.connected && ping < 0.f) return {kUnknown, Color{}};
+        if (measured.loss > 0.05f) return {"Losing packets", active.danger};
+        if (measured.stalls >= 3) return {"Stuttering", active.danger};
+        if (measured.jitter > 30.f) return {"Jumpy", active.warning};
+        if (measured.stalls >= 1) return {"Occasional stall", active.warning};
+        if (ping > 200.f) return {"Far away", active.warning};
+        return {"Good", active.success};
+    }
+
+    void applySettings() {
+        NetworkMonitor& monitor = NetworkMonitor::get();
+        monitor.setProbeInterval(settings.value<float>("interval", 1.f));
+        monitor.setStallThreshold(settings.value<float>("stallAbove", 200.f));
+    }
+
+    void applyProbe() { probe_.want(enabled() && settings.value<bool>("measure", true)); }
+
+    ProbeHolder probe_;
 };
 
 class ArmourHud final : public TextHud {
@@ -791,6 +960,7 @@ public:
     ArmourHud()
         : TextHud("armour", "Armour", "Armour points and health.",
                   {0.5f, 0.9f}, HudAnchor::BottomCenter) {
+        markNeedsGame();
         addTextSettings(true);
 
         settings.header("Lines shown");

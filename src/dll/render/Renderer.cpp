@@ -82,6 +82,9 @@ void Renderer::end() {
 }
 
 void Renderer::onDeviceLost() {
+    // A device that could not make an effect is gone; the one replacing it gets asked
+    // afresh rather than inheriting the verdict on its predecessor.
+    effectsSupported_ = true;
     solidBrush_.reset();
     gradientBrush_.reset();
     blurEffect_.reset();
@@ -603,7 +606,7 @@ bool Renderer::snapshot(const Rect& rect) {
             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
 
         if (FAILED(context_->CreateBitmap(size, nullptr, 0, properties, blurSnapshot_.put()))) {
-            effectsEnabled_ = false;
+            effectsSupported_ = false;
             Log::warn(kLog, "effects disabled: snapshot bitmap allocation failed");
             return false;
         }
@@ -623,12 +626,13 @@ bool Renderer::snapshot(const Rect& rect) {
 }
 
 void Renderer::blurBehind(const Rect& rect, float sigma, float radius) {
-    if (!context_ || !effectsEnabled_ || sigma <= 0.f) return;
+    if (!context_ || !effectsEnabled_ || !effectsSupported_ || sigma <= 0.f) return;
     if (!snapshot(rect)) return;
 
     if (!blurEffect_) {
         if (FAILED(context_->CreateEffect(CLSID_D2D1GaussianBlur, blurEffect_.put()))) {
-            effectsEnabled_ = false;
+            effectsSupported_ = false;
+            Log::warn(kLog, "effects unavailable: CreateEffect failed");
             return;
         }
         blurEffect_->SetValue(D2D1_GAUSSIANBLUR_PROP_BORDER_MODE, D2D1_BORDER_MODE_HARD);
@@ -645,12 +649,14 @@ void Renderer::blurBehind(const Rect& rect, float sigma, float radius) {
 }
 
 void Renderer::colorMatrix(const Rect& rect, const float matrix[20]) {
-    if (!context_ || !effectsEnabled_ || !matrix) return;
+    // Deliberately not gated on effectsEnabled_: see the note on effectsSupported().
+    if (!context_ || !effectsSupported_ || !matrix) return;
     if (!snapshot(rect)) return;
 
     if (!matrixEffect_) {
         if (FAILED(context_->CreateEffect(CLSID_D2D1ColorMatrix, matrixEffect_.put()))) {
-            effectsEnabled_ = false;
+            effectsSupported_ = false;
+            Log::warn(kLog, "colour grading unavailable: CreateEffect failed");
             return;
         }
     }

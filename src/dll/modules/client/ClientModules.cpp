@@ -15,12 +15,16 @@
 #include "dll/config/ClientConfig.hpp"
 #include "dll/feature/Clips.hpp"
 #include "dll/feature/Playtime.hpp"
+#include "dll/feature/Presence.hpp"
 #include "dll/feature/Screenshot.hpp"
 #include "dll/feature/Services.hpp"
 #include "dll/module/ModuleManager.hpp"
 #include "dll/render/ColorMatrix.hpp"
 #include "dll/modules/hud/TextHud.hpp"
+#include "dll/sdk/Camera.hpp"
+#include "dll/sdk/Entities.hpp"
 #include "dll/sdk/Game.hpp"
+#include "dll/sdk/Signals.hpp"
 #include "dll/ui/Notifications.hpp"
 #include "dll/ui/Theme.hpp"
 
@@ -378,7 +382,9 @@ public:
                           {"None", "Protanopia", "Deuteranopia", "Tritanopia"});
         settings.toggle("skipMenus", "Leave the client's own menus unfiltered", true);
 
-        on(&ScreenFilters::onRender, EventPriority::Low);
+        // First and not Low: at this point the target still holds the game's frame
+        // and nothing of ours. Later, and the HUD gets filtered with it.
+        on(&ScreenFilters::onRender, EventPriority::First);
         addKeywords({"filter", "night", "saturation", "contrast", "colour blind", "gamma"});
     }
 
@@ -586,86 +592,141 @@ public:
         settings.toggle("showToday", "Today", true);
         settings.toggle("showWeek", "This week", true);
         settings.toggle("showTotal", "Total", false);
-        settings.toggle("includeCurrent", "Include the current session", true);
 
         addKeywords({"time", "playtime", "hours", "stats"});
     }
 
+    // The session is already inside every total: Playtime counts the frame it is on,
+    // so adding it again here is what used to be called including it.
     std::vector<Row> rows() override {
         const Playtime& tracker = Playtime::get();
-        const long long live =
-            settings.value<bool>("includeCurrent", true) ? SessionStats::get().secondsPlayed() : 0;
-
         std::vector<Row> result;
 
         if (settings.value<bool>("showToday", true)) {
-            result.push_back(Row{"Today", strings::formatDuration(tracker.today() + live), {}});
+            result.push_back(Row{"Today", strings::formatDuration(tracker.today()), {}});
         }
         if (settings.value<bool>("showWeek", true)) {
-            result.push_back(Row{"7 days", strings::formatDuration(tracker.thisWeek() + live), {}});
+            result.push_back(Row{"7 days", strings::formatDuration(tracker.thisWeek()), {}});
         }
         if (settings.value<bool>("showTotal", false)) {
-            result.push_back(Row{"Total", strings::formatDuration(tracker.total() + live), {}});
+            result.push_back(Row{"Total", strings::formatDuration(tracker.total()), {}});
         }
 
         return result;
     }
 };
 
+// A tint over the entity you hit, drawn by Velyx over the game's own frame: the box
+// the entity stands in, projected, filled, and fading for a moment.
 class CustomHitColor final : public Module {
 public:
     CustomHitColor()
         : Module("custom_hit_color", "Hit colour", ModuleCategory::Render,
-                 "Tints a player you hit. Purely visual, client side.") {
+                 "Tints an entity you hit, for a moment. Purely visual, client side.") {
+        markWaitingUnless("the damage hook", sdk::Signals::actorHurtReady);
+        markNeedsGame();
         settings.color("color", "Colour", Color::rgb8(61, 220, 132, 130));
         settings.toggle("useThemeAccent", "Use the theme's accent", false);
         settings.slider("intensity", "Strength", 0.6f, 0.f, 1.f);
-        settings.toggle("selfOnly", "Only on your own hits", false);
+        settings.slider("duration", "Fades over", 0.3f, 0.08f, 1.f, "", " s");
+        settings.toggle("selfOnly", "Only on your own hits", true);
 
         settings.find("color")->visibleWhen = [this] {
             return !settings.value<bool>("useThemeAccent", false);
         };
 
         on(&CustomHitColor::onActorHurt);
+        on(&CustomHitColor::onRender, EventPriority::High);
         addKeywords({"colour", "hit", "hurt"});
     }
 
+    void onEnable() override { hits_.clear(); }
+
 private:
+    struct Hit {
+        Actor actor;
+        float life = 1.f;
+    };
+
     void onActorHurt(ActorHurtEvent& event) {
+        if (!event.actor || event.actor->address == 0) return;
+        if (settings.value<bool>("selfOnly", true) && !event.byPlayer) return;
+
         const Color base = settings.value<bool>("useThemeAccent", false)
                                ? theme().liveAccent()
                                : settings.value<Color>("color", palette::kMint);
-
         event.tint = base.withAlpha(base.a * settings.value<float>("intensity", 0.6f));
+
+        // One entry per entity: a second hit on the same one restarts the fade.
+        for (Hit& hit : hits_) {
+            if (hit.actor.address != event.actor->address) continue;
+            hit.actor = *event.actor;
+            hit.life = 1.f;
+            return;
+        }
+        if (hits_.size() < 16) hits_.push_back(Hit{*event.actor, 1.f});
     }
+
+    void onRender(RenderEvent& event) {
+        if (hits_.empty()) return;
+
+        const float duration = std::max(0.05f, settings.value<float>("duration", 0.3f));
+        const Color base = settings.value<bool>("useThemeAccent", false)
+                               ? theme().liveAccent()
+                               : settings.value<Color>("color", palette::kMint);
+        const Color tint = base.withAlpha(base.a * settings.value<float>("intensity", 0.6f));
+
+        const sdk::Camera& view = sdk::camera();
+        Renderer& renderer = *event.renderer;
+
+        for (Hit& hit : hits_) {
+            hit.life -= event.deltaSeconds / duration;
+            if (hit.life <= 0.f) continue;
+
+            // Where the entity is now, when the list still holds it; where it was hit
+            // otherwise, which for a fade this short is the same place.
+            if (const Actor* current = sdk::entities().find(hit.actor.address)) hit.actor = *current;
+
+            if (event.guiOpen || !view.valid()) continue;
+
+            Rect box;
+            if (!view.projectBox(hit.actor.minimum(0.05f), hit.actor.maximum(0.05f), box)) continue;
+
+            renderer.fillRounded(box, tint.fade(hit.life), 2.f);
+        }
+
+        std::erase_if(hits_, [](const Hit& hit) { return hit.life <= 0.f; });
+    }
+
+    std::vector<Hit> hits_;
 };
 
+// A tint of Velyx's own when the player takes damage, under the HUD and over the
+// game. The game's own red flash stays: the function it was drawn through is no
+// longer one the client can stand on, so this adds to it rather than replacing it.
 class CustomDamageTint final : public Module {
 public:
     CustomDamageTint()
         : Module("damage_tint", "Damage tint", ModuleCategory::Render,
-                 "Replaces the red overlay when you take damage.") {
+                 "Adds a tint of your own when you take damage.") {
+        markWaitingUnless("the damage hook", sdk::Signals::hurtReady);
+        markNeedsGame();
         settings.color("color", "Colour", Color::rgb8(232, 96, 82, 90));
         settings.slider("intensity", "Strength", 0.5f, 0.f, 1.f);
         settings.toggle("scaleWithDamage", "Scale with damage", true);
-        settings.toggle("disable", "Remove the overlay entirely", false);
-
-        const auto visible = [this] { return !settings.value<bool>("disable", false); };
-        settings.find("color")->visibleWhen = visible;
-        settings.find("intensity")->visibleWhen = visible;
-        settings.find("scaleWithDamage")->visibleWhen = visible;
+        settings.slider("duration", "Fades over", 0.45f, 0.1f, 2.f, "", " s");
+        settings.toggle("edgesOnly", "Edges only", false,
+                        "A vignette rather than the whole screen.");
 
         on(&CustomDamageTint::onHurt);
+        on(&CustomDamageTint::onRender, EventPriority::First);
         addKeywords({"damage", "red", "tint"});
     }
 
+    void onEnable() override { life_ = 0.f; }
+
 private:
     void onHurt(HurtEvent& event) {
-        if (settings.value<bool>("disable", false)) {
-            event.tint = Color{0.f, 0.f, 0.f, 0.f};
-            return;
-        }
-
         const Color base = settings.value<Color>("color", palette::kEmber);
         float intensity = settings.value<float>("intensity", 0.5f);
 
@@ -673,8 +734,38 @@ private:
             intensity *= clamp(event.damage / 10.f, 0.25f, 1.5f);
         }
 
-        event.tint = base.withAlpha(clamp(base.a * intensity, 0.f, 1.f));
+        strength_ = clamp(intensity, 0.f, 1.f);
+        life_ = 1.f;
+        event.tint = base.withAlpha(clamp(base.a * strength_, 0.f, 1.f));
     }
+
+    void onRender(RenderEvent& event) {
+        if (life_ <= 0.f) return;
+
+        const float duration = std::max(0.05f, settings.value<float>("duration", 0.45f));
+        life_ = std::max(0.f, life_ - event.deltaSeconds / duration);
+        if (life_ <= 0.f || event.guiOpen) return;
+
+        const Color base = settings.value<Color>("color", palette::kEmber);
+        const Color colour = base.fade(strength_ * life_);
+        const Vec2 screen = event.screenSize;
+        Renderer& renderer = *event.renderer;
+
+        if (!settings.value<bool>("edgesOnly", false)) {
+            renderer.fillRect(Rect{0.f, 0.f, screen.x, screen.y}, colour);
+            return;
+        }
+
+        const Color clear = colour.withAlpha(0.f);
+        const float width = std::min(screen.x, screen.y) * 0.22f;
+        renderer.fillGradient(Rect{0.f, 0.f, width, screen.y}, colour, clear, 0.f);
+        renderer.fillGradient(Rect{screen.x - width, 0.f, screen.x, screen.y}, clear, colour, 0.f);
+        renderer.fillGradient(Rect{0.f, 0.f, screen.x, width}, colour, clear, 90.f);
+        renderer.fillGradient(Rect{0.f, screen.y - width, screen.x, screen.y}, clear, colour, 90.f);
+    }
+
+    float life_ = 0.f;
+    float strength_ = 0.f;
 };
 
 
@@ -729,6 +820,139 @@ private:
 // The one thing a client cannot afford to leave unsaid: which key opens it. Drawn
 // while nothing of Velyx is on screen, in the corner the game leaves empty, and it
 // gets out of the way once the menu has been opened.
+// Velyx has no directory of its users and no account to sign in to, so the only two
+// ways it can know that the player over there is running it are that they said so,
+// and that the launcher started them here. Both are in this module, both are the
+// user's to switch on, and both feed the one registry the chat and the nametags read.
+class VelyxUsers final : public Module {
+public:
+    VelyxUsers()
+        : Module("velyx_users", "Velyx users", ModuleCategory::Utility,
+                 "Marks the other people running Velyx, in the chat and on their nametag.") {
+        settings.header("Finding them");
+        settings.toggle("listen", "Listen for other clients", true,
+                        "Reads the chat for the one line a Velyx client says when it arrives, "
+                        "and swallows it so you never see it. Sends nothing.");
+        settings.toggle("announce", "Say you are here", true,
+                        "Sends that same line once, a few seconds after you join a server. It "
+                        "is a normal chat message: the server sees it, and so does anyone "
+                        "without Velyx.");
+        settings.toggle("answer", "Answer someone who says it", true,
+                        "…unless you have already said it here, so a server full of Velyx does "
+                        "not turn into a server full of Velyx saying so.");
+        settings.toggle("instances", "The other instances on this machine", true,
+                        "The launcher's own copies find each other through a file, without the "
+                        "game and without a word in the chat.");
+
+        settings.header("The badge");
+        settings.text("badge", "Badge", "V");
+        settings.dropdown("badgeColor", "Colour", "Green",
+                          {"Green", "Aqua", "Gold", "Pink", "Grey"});
+        settings.toggle("inChat", "In front of their name in the chat", true);
+
+        settings.header("When one turns up");
+        settings.toggle("notify", "Notify me", true);
+        settings.toggle("chatNotice", "Say so in the chat", false,
+                        "A line only you can see.");
+
+        settings.button("announceNow", "Say it now", [] { presence().announceIn(0.f); },
+                        "Sends the line again, whether or not you have already.");
+
+        for (const char* id : {"listen", "announce", "answer", "instances", "badge",
+                               "badgeColor"}) {
+            settings.find(id)->onChange = [this] { apply(); };
+        }
+
+        // The chat line goes out through the game's own chat: one message, on joining,
+        // and only if you asked for it.
+        mutablePermissions().network = true;
+        mutablePermissions().files = true;
+
+        on(&VelyxUsers::onChat);
+        on(&VelyxUsers::onChatSend);
+        on(&VelyxUsers::onFound);
+
+        addKeywords({"velyx", "users", "friends", "client", "badge", "who", "players"});
+    }
+
+    void onEnable() override { apply(); }
+
+    void onDisable() override {
+        Presence& service = presence();
+        service.listen = false;
+        service.announce = false;
+        service.answer = false;
+        service.instances = false;
+        service.clear();
+    }
+
+private:
+    void apply() {
+        Presence& service = presence();
+        const bool live = enabled();
+
+        service.listen = live && settings.value<bool>("listen", true);
+        service.announce = live && settings.value<bool>("announce", true);
+        service.answer = live && settings.value<bool>("answer", true);
+        service.instances = live && settings.value<bool>("instances", true);
+
+        service.setBadge(settings.value<std::string>("badge", "V"),
+                         settings.value<std::string>("badgeColor", "Green"));
+    }
+
+    void onChat(ChatReceiveEvent& event) {
+        if (event.isCancelled()) return;
+        if (!settings.value<bool>("inChat", true)) return;
+
+        const std::string tag = presence().chatTag();
+        if (tag.empty()) return;
+
+        const std::string sender = strings::stripFormatting(event.sender);
+        if (!sender.empty()) {
+            if (presence().knows(sender)) event.sender = tag + " " + event.sender;
+            return;
+        }
+
+        // Most servers rewrite chat into one string and leave the sender empty. The
+        // name is then wherever the server chose to put it, which in practice is the
+        // front of the line — far enough in to clear a rank, not so far that someone
+        // merely being mentioned gets the badge.
+        std::string plain = strings::stripFormatting(event.message);
+        plain.resize(std::min<size_t>(plain.size(), 48));
+
+        for (const Peer& peer : presence().list()) {
+            if (!strings::containsInsensitive(plain, peer.name)) continue;
+            event.message = tag + " " + event.message;
+            return;
+        }
+    }
+
+    // The handshake is swallowed by every client that can read it, this one included,
+    // so without this nothing on screen would ever say that a line went out in your
+    // name — which is the one thing about this module worth being told.
+    void onChatSend(ChatSendEvent& event) {
+        if (event.isCancelled()) return;
+        if (!settings.value<bool>("notify", true)) return;
+        if (!Presence::readHandshake(event.message, nullptr, nullptr)) return;
+
+        Notifications::info("Velyx users", "Said in the chat that you are here.");
+    }
+
+    void onFound(PeerFoundEvent& event) {
+        const std::string where = event.local ? "on this machine" : "here";
+
+        if (settings.value<bool>("notify", true)) {
+            Notifications::info("Velyx user",
+                                std::format("{} is running Velyx, {}.", event.name, where));
+        }
+
+        if (settings.value<bool>("chatNotice", false)) {
+            sdk::game().showClientMessage(
+                std::format("{} {} is running Velyx.", presence().chatTag(), event.name));
+        }
+    }
+};
+
 class MenuHint final : public Module {
 public:
     MenuHint()
@@ -810,6 +1034,7 @@ void registerClientModules(ModuleManager& manager) {
     manager.add<CustomHitColor>();
     manager.add<CustomDamageTint>();
     manager.add<ClipMarkers>();
+    manager.add<VelyxUsers>();
     manager.add<MenuHint>();
 }
 

@@ -338,8 +338,7 @@ void HudEditor::drawSelection(Renderer& renderer, HudModule& element) {
     }
     x += 28.f;
 
-    if (gui.iconButton(UiId("hud_close"), Rect{x, bar.top + 4.f, x + 28.f, bar.bottom - 4.f}, "✕",
-                       active.danger)) {
+    if (gui.closeButton(UiId("hud_close"), Rect{x, bar.top + 4.f, x + 28.f, bar.bottom - 4.f})) {
         element.setEnabled(false);
         selected_ = nullptr;
         dragged_ = nullptr;

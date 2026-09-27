@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 
 #include "core/Math.hpp"
 #include "dll/event/Events.hpp"
@@ -35,8 +36,16 @@ public:
     [[nodiscard]] Vec3 up() const { return up_; }
     [[nodiscard]] float fieldOfView() const { return fov_; }
 
-    // The derived path only. Ignored the moment the game's matrix is available.
+    // The derived path only. Ignored the moment the game's matrix is available, and
+    // the field of view in it is ignored as soon as the game has said what it draws
+    // with: see setGameFov.
     void setCalibration(float fieldOfView, float eyeHeight);
+
+    // What the game itself computed, in degrees, handed over by the FOV hook every
+    // time the game asks for it. Zero when no hook is standing. With it, a pack that
+    // carries no fieldOfView offset still projects through the real one.
+    void setGameFov(float degrees);
+    [[nodiscard]] bool fovKnown() const { return gameFov_.load(std::memory_order_acquire) > 0.f; }
 
     // Screen pixels. False when the point is behind the camera or off in a way that
     // would project to a mirrored position in front of it.
@@ -69,6 +78,9 @@ private:
     Vec2 screenSize_;
     float fov_ = 70.f;
     float eyeHeight_ = 1.62f;
+
+    // Written by the FOV hook on whatever thread the game asks from.
+    std::atomic<float> gameFov_{0.f};
 
     bool valid_ = false;
     bool exact_ = false;

@@ -85,8 +85,17 @@ public:
 
     void colorMatrix(const Rect& rect, const float matrix[20]);
 
+    // Whether the *decorative* effects are wanted: the blur behind a panel and the
+    // drop shadows. Follows the theme, and performance mode turns it off to buy frames.
     void setEffectsEnabled(bool enabled) { effectsEnabled_ = enabled; }
     [[nodiscard]] bool effectsEnabled() const { return effectsEnabled_; }
+
+    // Whether the device can run a D2D effect at all. Latched off the first time one
+    // fails to be created, and cleared again when the device is rebuilt. Grading the
+    // whole frame — fullbright, the screen filters — is gated on this and not on the
+    // preference above: those are the picture, not decoration, and a theme that turns
+    // the blur off is not asking for them to stop.
+    [[nodiscard]] bool effectsSupported() const { return effectsSupported_; }
 
     void onDeviceLost();
 
@@ -128,6 +137,7 @@ private:
     std::vector<bool> clipIsLayer_;
 
     bool effectsEnabled_ = true;
+    bool effectsSupported_ = true;
     FrameStats stats_;
 };
 

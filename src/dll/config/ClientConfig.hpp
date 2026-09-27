@@ -29,11 +29,6 @@ public:
     bool onboardingCompleted = false;
     bool telemetry = false;
 
-    // Whether opening an interface puts the game to sleep behind it, the way alt-tabbing
-    // does. Off leaves the game running with its input refused, which is not the same
-    // thing: see the note in WindowHook::setCaptureInput.
-    bool suspendGame = true;
-
     Keybind guiKey{VK_INSERT, false, false, false, Keybind::Mode::Toggle};
 
     // The menu's second way in: it opens on the module list with the search field
@@ -44,7 +39,17 @@ public:
     Keybind screenshotKey{VK_F2, false, false, false, Keybind::Mode::Once};
     Keybind clipMarkerKey{VK_F8, false, false, false, Keybind::Mode::Once};
 
+    // The game's own chat key, not one of the client's. Knowing which it is keeps a
+    // module bound to a letter from firing in the middle of a sentence: see
+    // ModuleManager's note on it. Only the key is read; the mode means nothing here.
+    Keybind gameChatKey{'T', false, false, false, Keybind::Mode::Once};
+
     bool cleanShutdown = true;
+
+    // Set by the crash handler at the moment it records a fault, and cleared at the
+    // next start once it has been counted. This — not an unclean exit — is what a
+    // crash looks like from the config's side.
+    bool faulted = false;
 
     int crashStreak = 0;
 

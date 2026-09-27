@@ -143,6 +143,7 @@ void writeReport(EXCEPTION_POINTERS* info) {
     }
 
     ClientConfig& settings = config();
+    settings.faulted = true;
     settings.lastCrashModule = breadcrumb;
     settings.lastCrashReason = exceptionName(info->ExceptionRecord->ExceptionCode);
     settings.save();

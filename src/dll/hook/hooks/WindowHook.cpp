@@ -12,6 +12,7 @@
 #include "core/Log.hpp"
 #include "core/Strings.hpp"
 #include "dll/event/Events.hpp"
+#include "dll/hook/hooks/UserInputHook.hpp"
 
 namespace velyx {
 namespace {
@@ -33,11 +34,14 @@ std::wstring g_pendingTitle;
 std::atomic<bool> g_titlePending{false};
 std::atomic<bool> g_releasePending{false};
 
-// 0 nothing, 1 send the game to sleep, 2 wake it. Handed to the window's own thread
-// for the same reason the title is: activation is the message loop's business.
-std::atomic<int> g_pendingActivation{0};
-std::atomic<bool> g_suspendGame{true};
-std::atomic<bool> g_suspended{false};
+// 0 nothing, 1 show the pointer, 2 take it back. Handed to the window's own thread for
+// the same reason the title is — and for a sharper one. The count that decides whether
+// a cursor is drawn belongs to the input queue of the thread that owns the foreground
+// window, which here is the thread the messages run on, not the one the frames do.
+// Asking for it from the render thread moved a counter nobody looks at, and the
+// interface came up with no pointer on it at all.
+std::atomic<int> g_cursorPending{0};
+
 Vec2 g_mouse;
 bool g_keys[256]{};
 
@@ -45,9 +49,14 @@ bool g_keys[256]{};
 // a game's own procedure is not always the truth — a bind with Ctrl in it would then
 // never match, however hard the key is held. Every key already passes through here, so
 // what was seen is asked first and GetKeyState is only the second opinion.
+//
+// And it has to be the *real* GetKeyState. The releases below wipe this record when an
+// interface opens, so a Ctrl held from before it opened is not in it; user32 is then
+// the only one who still knows, and user32 is busy telling the game that nothing is
+// held at all. Ctrl+K would have opened the menu and been unable to close it.
 bool modifierHeld(int generic, int left, int right) {
     if (g_keys[generic] || g_keys[left] || g_keys[right]) return true;
-    return (GetKeyState(generic) & 0x8000) != 0;
+    return (UserInputHook::realKeyState(generic) & 0x8000) != 0;
 }
 
 void fillModifiers(KeyEvent& event) {
@@ -138,27 +147,6 @@ namespace {
 
 // Straight to the game's own procedure: dispatch() swallows keys while the client
 // is capturing, which is the very thing being worked around.
-// Refusing input is not the same as having none. Bedrock reads its keyboard and mouse
-// through GameInput, whose readings are a *state*: told there is no reading, the game
-// keeps the last one it had, so anything held when the menu opened stays held and the
-// player carries on sprinting behind it. Ctrl+K is the worst of it, because Ctrl is the
-// sprint key and it is by definition down at the moment the menu opens.
-//
-// What the game does understand is losing the window. Alt-tabbing is a path every
-// engine handles and Bedrock handles it by dropping the input and putting up its pause
-// screen — which is what "like pressing Escape" means. So that is what it is told.
-void setGameAwake(HWND window, bool awake) {
-    if (!window || !g_originalProc) return;
-
-    if (awake) {
-        CallWindowProcW(g_originalProc, window, WM_ACTIVATE, MAKEWPARAM(WA_ACTIVE, 0), 0);
-        CallWindowProcW(g_originalProc, window, WM_SETFOCUS, 0, 0);
-    } else {
-        CallWindowProcW(g_originalProc, window, WM_KILLFOCUS, 0, 0);
-        CallWindowProcW(g_originalProc, window, WM_ACTIVATE, MAKEWPARAM(WA_INACTIVE, 0), 0);
-    }
-}
-
 void releaseHeldKeys(HWND window) {
     if (!window || !g_originalProc) return;
 
@@ -203,52 +191,22 @@ void WindowHook::setCaptureInput(bool capture) {
     if (previous == capture) return;
 
     if (capture) {
-
-        ClipCursor(nullptr);
-        while (ShowCursor(TRUE) < 0) {}
-
         // Whatever was held when the client took over never gets its key-up: the
-        // procedure swallows those from here on, and the game is left sprinting on a
-        // Ctrl that is no longer down. Opening the menu with Ctrl+K did exactly that.
-        // The releases are handed to the window's own thread, like the title.
+        // procedure swallows those from here on, and the game would be left sprinting
+        // on a Ctrl that is no longer down. Opening the menu with Ctrl+K did exactly
+        // that. The releases are handed to the window's own thread, like the title.
+        //
+        // Only the part of the story this procedure owns. Bedrock does not read its
+        // keyboard from these messages at all — it reads raw input, which
+        // UserInputHook empties, and GameInput readings, which GameInputHook empties.
+        // This is for whatever does listen to the window.
         g_releasePending.store(true, std::memory_order_release);
-
-        if (g_suspendGame.load(std::memory_order_acquire)) {
-            g_suspended.store(true, std::memory_order_release);
-            g_pendingActivation.store(1, std::memory_order_release);
-        }
-    } else {
-        while (ShowCursor(FALSE) >= 0) {}
-
-        // Woken whatever the setting says now: turning it off while the game is asleep
-        // must not leave it there.
-        if (g_suspended.exchange(false, std::memory_order_acq_rel)) {
-            g_pendingActivation.store(2, std::memory_order_release);
-        }
     }
+
+    g_cursorPending.store(capture ? 1 : 2, std::memory_order_release);
 
     if (g_window) PostMessageW(g_window, WM_NULL, 0, 0);
 }
-
-// Changed with an interface already open, this has to take effect now rather than at
-// the next one: switched off, the game is asleep and nothing else would wake it until
-// that interface closes.
-void WindowHook::setSuspendGame(bool suspend) {
-    if (g_suspendGame.exchange(suspend, std::memory_order_acq_rel) == suspend) return;
-
-    if (!suspend) {
-        if (!g_suspended.exchange(false, std::memory_order_acq_rel)) return;
-        g_pendingActivation.store(2, std::memory_order_release);
-    } else {
-        if (!captureInput()) return;
-        if (g_suspended.exchange(true, std::memory_order_acq_rel)) return;
-        g_pendingActivation.store(1, std::memory_order_release);
-    }
-
-    if (g_window) PostMessageW(g_window, WM_NULL, 0, 0);
-}
-
-bool WindowHook::suspendsGame() { return g_suspendGame.load(std::memory_order_acquire); }
 
 bool WindowHook::captureInput() { return g_capture.load(std::memory_order_relaxed); }
 
@@ -276,6 +234,18 @@ Vec2 WindowHook::mousePosition() { return g_mouse; }
 bool WindowHook::isKeyDown(int virtualKey) {
     if (virtualKey < 0 || virtualKey > 255) return false;
     return g_keys[virtualKey];
+}
+
+// For anything of the client's that needs to know about a modifier while an interface
+// is open. Asking user32 there is no use: UserInputHook keeps its answers empty for as
+// long as capture lasts, so the procedure's own record is the only truthful one.
+bool WindowHook::isModifierDown(int genericKey) {
+    switch (genericKey) {
+        case VK_SHIFT:   return modifierHeld(VK_SHIFT, VK_LSHIFT, VK_RSHIFT);
+        case VK_CONTROL: return modifierHeld(VK_CONTROL, VK_LCONTROL, VK_RCONTROL);
+        case VK_MENU:    return modifierHeld(VK_MENU, VK_LMENU, VK_RMENU);
+        default:         return isKeyDown(genericKey);
+    }
 }
 
 std::string WindowHook::keyName(int virtualKey) {
@@ -323,10 +293,17 @@ LRESULT CALLBACK WindowHook::wndProc(HWND window, UINT message, WPARAM wParam, L
 
     if (g_releasePending.exchange(false, std::memory_order_acq_rel)) releaseHeldKeys(window);
 
-    // After the releases, so the game is not asked to sleep on a key it still thinks
-    // is down, and before anything else is dispatched.
-    if (const int activation = g_pendingActivation.exchange(0, std::memory_order_acq_rel)) {
-        setGameAwake(window, activation == 2);
+    // Both loops are bounded. They run on the thread that pumps the game's messages,
+    // and a count that refuses to move would otherwise hang the game rather than the
+    // cursor.
+    if (const int cursor = g_cursorPending.exchange(0, std::memory_order_acq_rel)) {
+        constexpr int kGuard = 64;
+        if (cursor == 1) {
+            ClipCursor(nullptr);
+            for (int i = 0; i < kGuard && ShowCursor(TRUE) < 0; ++i) {}
+        } else {
+            for (int i = 0; i < kGuard && ShowCursor(FALSE) >= 0; ++i) {}
+        }
     }
 
     if (g_titlePending.exchange(false, std::memory_order_acq_rel)) {
@@ -349,6 +326,79 @@ LRESULT CALLBACK WindowHook::wndProc(HWND window, UINT message, WPARAM wParam, L
     }
 
     return CallWindowProcW(g_originalProc, window, message, wParam, lParam);
+}
+
+namespace {
+
+bool isInputMessage(UINT message) {
+    switch (message) {
+        case WM_MOUSEMOVE:
+        case WM_MOUSEWHEEL:
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+        case WM_MBUTTONDOWN:
+        case WM_XBUTTONDOWN:
+        case WM_LBUTTONDBLCLK:
+        case WM_RBUTTONDBLCLK:
+        case WM_MBUTTONDBLCLK:
+        case WM_XBUTTONDBLCLK:
+        case WM_LBUTTONUP:
+        case WM_RBUTTONUP:
+        case WM_MBUTTONUP:
+        case WM_XBUTTONUP:
+        case WM_KEYDOWN:
+        case WM_KEYUP:
+        case WM_SYSKEYDOWN:
+        case WM_SYSKEYUP:
+        case WM_CHAR:
+        case WM_INPUT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+}
+
+// Swallowing a message in this procedure only helps against a game that reads its input
+// from one. Bedrock does not: it takes what it wants out of the pump itself, before
+// DispatchMessage has been called at all, which is why its own buttons went on being
+// clicked through an open menu. So the message is taken from it there — the client is
+// handed it directly, and what is left in the queue is a WM_NULL that means nothing to
+// anyone.
+bool WindowHook::interceptForClient(MSG* message) {
+    if (!message || !captureInput()) return false;
+    if (message->hwnd != g_window || !isInputMessage(message->message)) return false;
+
+    // A key still has to become a character, or the search field goes deaf. This posts
+    // the WM_CHAR, which comes back through this same door a turn of the pump later.
+    if (message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN) {
+        TranslateMessage(message);
+    }
+
+    // Told it is capturing, the body below emits the events the interface lives on and
+    // hands the game's own procedure nothing. Guarded like the procedure itself is:
+    // this returns into the game's own pump, and a module that throws there would take
+    // the game down with it.
+    try {
+        dispatch(message->hwnd, message->message, message->wParam, message->lParam, true);
+    } catch (const std::exception& error) {
+        Log::error(kLog, "input handler threw: {}", error.what());
+    } catch (...) {
+        Log::error(kLog, "input handler threw");
+    }
+
+    // Raw input is the one message the system still wants handed back when it is being
+    // withheld: what sits behind it is only released when someone reads it or the
+    // default procedure sees it, and the game is about to do neither.
+    if (message->message == WM_INPUT) {
+        DefWindowProcW(message->hwnd, message->message, message->wParam, message->lParam);
+    }
+
+    message->message = WM_NULL;
+    message->wParam = 0;
+    message->lParam = 0;
+    return true;
 }
 
 LRESULT WindowHook::dispatch(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
@@ -449,8 +499,19 @@ LRESULT WindowHook::dispatch(HWND window, UINT message, WPARAM wParam, LPARAM lP
         }
 
         case WM_INPUT:
-
-            if (capturing) return 0;
+            // Said once, and only from behind an open interface: raw input still
+            // arriving here means the game is picking it out of the pump itself rather
+            // than from this procedure, and that swallowing it here settles nothing.
+            if (capturing) {
+                static std::atomic<bool> said{false};
+                if (!said.exchange(true, std::memory_order_acq_rel)) {
+                    Log::info(kLog, "raw input arrives while an interface is open");
+                }
+                // Handed back for its cleanup, and to nobody else. Same reason as in
+                // interceptForClient above.
+                DefWindowProcW(window, message, wParam, lParam);
+                return 0;
+            }
             break;
 
         case WM_SETCURSOR:

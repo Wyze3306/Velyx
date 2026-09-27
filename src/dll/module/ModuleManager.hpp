@@ -101,6 +101,11 @@ private:
 
     std::mutex pendingMutex_;
     std::vector<std::pair<Module*, bool>> pendingToggles_;
+
+    // A held module's key-up, kept until the frame has checked the key really is up.
+    // Under Wine a key held down repeats as a release and a press, and a frame that
+    // falls between the two would switch a held zoom off and on again.
+    std::vector<std::pair<Module*, int>> pendingReleases_;
 };
 
 void registerBuiltInModules(ModuleManager& manager);

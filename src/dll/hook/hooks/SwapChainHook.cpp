@@ -42,6 +42,15 @@ ExecuteCommandListsFn g_originalExecuteCommandLists = nullptr;
 SwapChainHook::PresentCallback g_onPresent;
 std::atomic<bool> g_presenting{false};
 
+std::atomic<bool> g_bypassVsync{false};
+std::atomic<bool> g_wantTearing{true};
+std::atomic<IDXGISwapChain*> g_lastPresented{nullptr};
+
+// -1 until a swapchain has been asked. The answer only changes across a resize, and
+// a resize puts it back to -1, so the question is asked once per swapchain rather
+// than once per frame.
+std::atomic<int> g_tearingAvailable{-1};
+
 // Every detour below is a boundary the game calls across. An exception that escapes
 // one of them reaches DXGI, which has no handler for it, and the process ends through
 // std::terminate — an abort with no backtrace, which is what resizing the window was
@@ -59,20 +68,87 @@ void guarded(const char* what, Fn&& body) {
 
 void dispatchPresent(IDXGISwapChain* swapChain) {
     g_presenting.store(true, std::memory_order_relaxed);
+    g_lastPresented.store(swapChain, std::memory_order_relaxed);
     guarded("present", [&] {
         if (g_onPresent) g_onPresent(swapChain);
     });
 }
 
+void resolveTearing(IDXGISwapChain* swapChain) {
+    if (g_tearingAvailable.load(std::memory_order_relaxed) >= 0) return;
+
+    int answer = 0;
+
+    // Exclusive fullscreen has its own flip, and the tearing flag is illegal there
+    // however the swapchain was built, so both halves of the question are asked here.
+    ComPtr<IDXGISwapChain1> modern;
+    BOOL fullscreen = FALSE;
+    DXGI_SWAP_CHAIN_DESC1 desc{};
+    if (SUCCEEDED(swapChain->QueryInterface(__uuidof(IDXGISwapChain1),
+                                            reinterpret_cast<void**>(modern.put()))) &&
+        SUCCEEDED(modern->GetDesc1(&desc)) &&
+        SUCCEEDED(swapChain->GetFullscreenState(&fullscreen, nullptr)) && !fullscreen) {
+        answer = (desc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) != 0 ? 1 : 0;
+    }
+
+    g_tearingAvailable.store(answer, std::memory_order_relaxed);
+    Log::info(kLog, "tearing {}", answer == 1 ? "available" : "not available");
+}
+
+// Returns the sync interval to present with, and adds the tearing flag when the
+// swapchain will take it. A game already presenting unsynced is left alone.
+UINT overridden(IDXGISwapChain* swapChain, UINT syncInterval, UINT& flags) {
+    if (syncInterval == 0 || !g_bypassVsync.load(std::memory_order_relaxed)) return syncInterval;
+
+    resolveTearing(swapChain);
+    if (g_wantTearing.load(std::memory_order_relaxed) &&
+        g_tearingAvailable.load(std::memory_order_relaxed) == 1) {
+        flags |= DXGI_PRESENT_ALLOW_TEARING;
+    }
+    return 0;
+}
+
+// DXGI answers an argument it will not take with INVALID_CALL, and the frame is gone
+// with it. Rather than lose a frame every time, the refusal is remembered — tearing
+// goes back to unavailable — and the frame is presented again on the game's own
+// terms, so nothing on screen is lost either.
+bool refusedTheOverride(HRESULT result, bool overrode) {
+    if (result != DXGI_ERROR_INVALID_CALL || !overrode) return false;
+
+    g_tearingAvailable.store(0, std::memory_order_relaxed);
+
+    static std::atomic<bool> said{false};
+    if (!said.exchange(true)) {
+        Log::warn(kLog, "present refused the override, falling back to the game's arguments");
+    }
+    return true;
+}
+
 HRESULT STDMETHODCALLTYPE presentDetour(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
 
     if (!(flags & DXGI_PRESENT_TEST)) dispatchPresent(swapChain);
+
+    UINT wantedFlags = flags;
+    const UINT wantedSync = overridden(swapChain, syncInterval, wantedFlags);
+    const bool overrode = wantedSync != syncInterval || wantedFlags != flags;
+
+    const HRESULT result = g_originalPresent(swapChain, wantedSync, wantedFlags);
+    if (!refusedTheOverride(result, overrode)) return result;
+
     return g_originalPresent(swapChain, syncInterval, flags);
 }
 
 HRESULT STDMETHODCALLTYPE present1Detour(IDXGISwapChain1* swapChain, UINT syncInterval, UINT flags,
                                          const DXGI_PRESENT_PARAMETERS* parameters) {
     if (!(flags & DXGI_PRESENT_TEST)) dispatchPresent(swapChain);
+
+    UINT wantedFlags = flags;
+    const UINT wantedSync = overridden(swapChain, syncInterval, wantedFlags);
+    const bool overrode = wantedSync != syncInterval || wantedFlags != flags;
+
+    const HRESULT result = g_originalPresent1(swapChain, wantedSync, wantedFlags, parameters);
+    if (!refusedTheOverride(result, overrode)) return result;
+
     return g_originalPresent1(swapChain, syncInterval, flags, parameters);
 }
 
@@ -92,6 +168,11 @@ HRESULT STDMETHODCALLTYPE resizeBuffersDetour(IDXGISwapChain* swapChain, UINT bu
     // whichever thread the game resizes from, and the client's own reaction to a new
     // size — relayout, fonts — belongs to the render thread, which picks it up from
     // takeResized() once the targets are back.
+    // A resize is also how the game enters and leaves fullscreen, and the tearing
+    // flag is only legal on one side of that. The answer is thrown away rather than
+    // carried across.
+    g_tearingAvailable.store(-1, std::memory_order_relaxed);
+
     guarded("resize", [&] {
         GraphicsContext& graphics = GraphicsContext::get();
         graphics.releaseTargets();
@@ -141,6 +222,25 @@ bool SwapChainHook::presenting() { return g_presenting.load(std::memory_order_re
 
 void SwapChainHook::setPresentCallback(PresentCallback callback) {
     g_onPresent = std::move(callback);
+}
+
+void SwapChainHook::setPresentation(Presentation presentation) {
+    g_bypassVsync.store(presentation.bypassVsync, std::memory_order_relaxed);
+    g_wantTearing.store(presentation.allowTearing, std::memory_order_relaxed);
+}
+
+bool SwapChainHook::tearingAvailable() {
+    return g_tearingAvailable.load(std::memory_order_relaxed) == 1;
+}
+
+void SwapChainHook::probeTearing() {
+    if (IDXGISwapChain* swapChain = g_lastPresented.load(std::memory_order_relaxed)) {
+        resolveTearing(swapChain);
+    }
+}
+
+IDXGISwapChain* SwapChainHook::lastPresented() {
+    return g_lastPresented.load(std::memory_order_relaxed);
 }
 
 bool SwapChainHook::captureVTables(void** swapChainVTable, size_t swapChainCount,

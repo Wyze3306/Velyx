@@ -11,12 +11,14 @@
 
 #include "core/Strings.hpp"
 #include "dll/Velyx.hpp"
+#include "dll/feature/Presence.hpp"
 #include "dll/module/HudModule.hpp"
 #include "dll/module/ModuleManager.hpp"
 #include "dll/modules/hud/TextHud.hpp"
 #include "dll/sdk/Camera.hpp"
 #include "dll/sdk/Entities.hpp"
 #include "dll/sdk/Game.hpp"
+#include "dll/sdk/Signals.hpp"
 #include "dll/ui/Notifications.hpp"
 #include "dll/ui/Theme.hpp"
 
@@ -174,6 +176,7 @@ public:
     Hitboxes()
         : Module("hitboxes", "Hitboxes", ModuleCategory::Combat,
                  "Draws the box an entity is actually hit against, over players and mobs.") {
+        markNeedsEntities();
         settings.header("Shape");
         settings.dropdown("style", "Style", "Corners",
                           {"Corners", "Box", "3D outline", "Filled", "Feet"});
@@ -347,11 +350,15 @@ public:
     Nametags()
         : Module("nametags", "Nametags", ModuleCategory::Combat,
                  "Names, health and distance above the entities you choose.") {
+        markNeedsEntities();
         settings.header("Content");
         settings.toggle("showHealth", "Health", true);
         settings.toggle("showDistance", "Distance", true);
         settings.toggle("healthBar", "Health bar under the name", true);
         settings.toggle("showKind", "What it is", false);
+        settings.toggle("velyxBadge", "Mark Velyx users", true,
+                        "A chip in front of the name of anyone the Velyx users module has "
+                        "found. Nothing to mark until that one is on.");
 
         settings.header("Size");
         settings.slider("size", "Text size", 13.f, 8.f, 28.f, "", "px");
@@ -439,9 +446,17 @@ private:
         const float padding = 5.f * scale;
         const float lift = settings.value<float>("lift", 6.f);
 
-        const Rect pill = Rect::fromSize(anchor.x - size.x * 0.5f - padding,
+        // A chip in front of the name rather than another word inside it: it has to
+        // read at a glance, and the tag has to stay centred over the head it belongs
+        // to whether or not it carries one.
+        const std::string badge = velyxUser(actor) ? presence().badgeText() : std::string{};
+        const float badgeText = badge.empty() ? 0.f : renderer.measure(badge, spec).x;
+        const float badgeWidth = badge.empty() ? 0.f : badgeText + padding * 2.f;
+        const float width = size.x + badgeWidth;
+
+        const Rect pill = Rect::fromSize(anchor.x - width * 0.5f - padding,
                                          anchor.y - size.y - padding * 2.f - lift,
-                                         size.x + padding * 2.f, size.y + padding * 2.f);
+                                         width + padding * 2.f, size.y + padding * 2.f);
 
         if (settings.value<bool>("background", true)) {
             renderer.fillRounded(
@@ -450,12 +465,22 @@ private:
                 4.f * scale);
         }
 
+        if (!badge.empty()) {
+            const Color chipColour = presence().colour();
+            const Rect chip{pill.left + padding * 0.5f, pill.top + padding * 0.5f,
+                            pill.left + padding * 1.5f + badgeText, pill.bottom - padding * 0.5f};
+
+            renderer.fillRounded(chip, chipColour.fade(alpha), 3.f * scale);
+            renderer.text(badge, chip, chipColour.readableForeground().fade(alpha), spec);
+        }
+
+        const Rect name{pill.left + badgeWidth, pill.top, pill.right, pill.bottom};
         const Color colour = colourFor(settings, actor, active).fade(alpha);
 
         if (settings.value<bool>("shadow", true)) {
-            renderer.textShadowed(label, pill, colour, spec);
+            renderer.textShadowed(label, name, colour, spec);
         } else {
-            renderer.text(label, pill, colour, spec);
+            renderer.text(label, name, colour, spec);
         }
 
         if (!settings.value<bool>("healthBar", true) || !actor.living()) return;
@@ -471,6 +496,12 @@ private:
             lerp(active.danger, active.success, fraction).fade(alpha), height * 0.5f);
     }
 
+    [[nodiscard]] bool velyxUser(const Actor& actor) const {
+        if (!settings.value<bool>("velyxBadge", true)) return false;
+        if (!actor.isPlayer() || actor.name.empty()) return false;
+        return presence().knows(strings::stripFormatting(actor.name));
+    }
+
     // Rebuilt every frame, kept as a member so the drawing does not allocate once per
     // frame for a list whose size barely changes.
     std::vector<const Actor*> chosen_;
@@ -483,6 +514,7 @@ public:
     Tracers()
         : Module("tracers", "Tracers", ModuleCategory::Combat,
                  "A line to each target, from the edge of the screen or from the crosshair.") {
+        markNeedsEntities();
         settings.header("Line");
         settings.dropdown("from", "Starts at", "Bottom of the screen",
                           {"Bottom of the screen", "Crosshair", "Top of the screen"});
@@ -551,6 +583,7 @@ public:
     TargetHud()
         : HudModule("target_hud", "Target", "The player you are fighting, and their health.",
                     {0.5f, 0.22f}, HudAnchor::Center) {
+        markNeedsEntities();
         settings.header("Target");
         settings.dropdown("pick", "Chosen by", "Last hit, then aim",
                           {"Last hit, then aim", "Last hit only", "What you aim at",
@@ -715,6 +748,7 @@ public:
     CombatRadar()
         : HudModule("radar", "Radar", "Nearby entities, on a dial that turns with you.",
                     {0.985f, 0.42f}, HudAnchor::MiddleRight) {
+        markNeedsEntities();
         settings.header("Dial");
         settings.slider("size", "Diameter", 130.f, 60.f, 320.f, "", "px");
         settings.slider("range", "Range", 48.f, 8.f, 256.f, "", " m");
@@ -876,6 +910,7 @@ public:
     HitMarker()
         : Module("hit_marker", "Hit marker", ModuleCategory::Combat,
                  "Marks the crosshair the moment a hit registers.") {
+        markWaitingUnless("the damage hook", sdk::Signals::actorHurtReady);
         settings.header("Mark");
         settings.dropdown("style", "Style", "Cross", {"Cross", "Ring", "Dot", "Corners"});
         settings.slider("size", "Size", 9.f, 3.f, 30.f, "", "px");
@@ -911,6 +946,10 @@ public:
 
 private:
     void onActorHurt(ActorHurtEvent& event) {
+        // Only the player's own hits: an entity hurt by something else is not a hit
+        // to mark.
+        if (!event.byPlayer) return;
+
         life_.set(1.f);
         kill_ = event.actor != nullptr && event.actor->living() && event.actor->health <= 0.f;
 
@@ -996,6 +1035,8 @@ public:
     ReachDisplay()
         : TextHud("reach", "Reach", "The distance of your hits, measured as the game does.",
                   {0.5f, 0.62f}, HudAnchor::Center) {
+        markWaitingUnless("the attack hook", sdk::Signals::attackReady);
+        markNeedsGame();
         addTextSettings(true);
 
         settings.header("Lines shown");
@@ -1075,6 +1116,7 @@ public:
     LowHealthAlert()
         : Module("low_health", "Low health alert", ModuleCategory::Combat,
                  "Pulses the edge of the screen when your health drops.") {
+        markNeedsGame();
         settings.header("Trigger");
         settings.slider("threshold", "Below", 7.f, 1.f, 20.f, "", " hp");
         settings.toggle("useFraction", "As a share of the maximum", false);

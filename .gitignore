@@ -19,3 +19,4 @@ compile_commands.json
 assets/signatures/*.json
 !assets/signatures/template.json
 
+tools/__pycache__/

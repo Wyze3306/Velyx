@@ -52,7 +52,8 @@ public:
         settings.toggle("skipMenus", "Leave the client's own menus alone", true);
         settings.slider("fade", "Ease in over", 0.35f, 0.f, 2.f, "", " s");
 
-        on(&Fullbright::onRender, EventPriority::Low);
+        // Ahead of every HUD element: this brightens the game, not the client.
+        on(&Fullbright::onRender, EventPriority::First);
         addKeywords({"fullbright", "brightness", "gamma", "night", "cave", "light"});
     }
 
@@ -239,6 +240,7 @@ public:
     Waypoints()
         : Module("waypoints", "Waypoints", ModuleCategory::Render,
                  "Marks a place and keeps pointing at it, on screen or off it.") {
+        markNeedsGame();
         mutablePermissions().files = true;
 
         settings.header("Dropping one");
@@ -439,6 +441,7 @@ public:
     ChatMacros()
         : Module("chat_macros", "Chat macros", ModuleCategory::Utility,
                  "A key sends a message, so a queue command is one press.") {
+        markNeedsGame();
         for (int slot = 0; slot < kSlots; ++slot) {
             settings.header(std::format("Macro {}", slot + 1));
             settings.text(messageId(slot), "Message", slot == 0 ? "gg" : "");
@@ -518,6 +521,7 @@ public:
     CoordinateTools()
         : Module("coord_tools", "Coordinate tools", ModuleCategory::Utility,
                  "Copies or announces where you are, in one press.") {
+        markNeedsGame();
         mutablePermissions().clipboard = true;
 
         settings.header("Keys");

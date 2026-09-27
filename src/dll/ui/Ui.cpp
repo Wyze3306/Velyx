@@ -6,6 +6,7 @@
 
 #include "core/Lang.hpp"
 #include "core/Strings.hpp"
+#include "dll/hook/hooks/WindowHook.hpp"
 #include "dll/ui/Theme.hpp"
 
 namespace velyx {
@@ -250,6 +251,31 @@ bool Ui::iconButton(const UiId& id, const Rect& rect, std::string_view glyph, co
     const Color color = tint.a > 0.f ? tint : active.textMuted;
     renderer_->text(glyph, rect, lerp(color, active.text, hover),
                     makeFont(15.f, FontWeight::Medium, TextAlign::Center, TextVAlign::Middle));
+
+    return pressed;
+}
+
+// Two strokes rather than a glyph. The bundled families have no ✕ between them, and
+// what a missing glyph falls back to belongs to the machine the client is running on —
+// on one without that fallback the button came out blank, which is no way to offer the
+// way back to the game.
+bool Ui::closeButton(const UiId& id, const Rect& rect) {
+    const auto& active = theme();
+    const bool pressed = hoverAndClick(id, rect, true);
+    const float hover = animate(id, hovered(id));
+
+    if (hover > 0.01f) {
+        renderer_->fillRounded(rect, active.danger.fade(hover * 0.85f), active.radius * 0.75f);
+    }
+
+    const Color color = lerp(active.textMuted, active.text, hover);
+    const Vec2 centre = rect.center();
+    const float arm = std::min(6.f, std::min(rect.width(), rect.height()) * 0.25f);
+
+    renderer_->line({centre.x - arm, centre.y - arm}, {centre.x + arm, centre.y + arm}, color,
+                    1.8f);
+    renderer_->line({centre.x - arm, centre.y + arm}, {centre.x + arm, centre.y - arm}, color,
+                    1.8f);
 
     return pressed;
 }
@@ -689,9 +715,9 @@ bool Ui::keybindField(const UiId& id, const Rect& rect, Keybind& value) {
                 continue;
             } else {
                 value.key = key;
-                value.ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-                value.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-                value.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+                value.ctrl = WindowHook::isModifierDown(VK_CONTROL);
+                value.shift = WindowHook::isModifierDown(VK_SHIFT);
+                value.alt = WindowHook::isModifierDown(VK_MENU);
             }
             capturingKeybind_ = UiId{};
             changed = true;

@@ -93,15 +93,13 @@ ClickGui::ClickGui()
     settings.dropdown("language", "Language", config().language,
                       lang::available(Velyx::get().asset("lang")));
 
-    settings.header("While it is open");
-    settings.toggle("suspendGame", "Send the game to sleep", config().suspendGame,
-                    "Stops the game behind the interface, the way alt-tabbing stops it. "
-                    "Off leaves it running with its input merely refused, which is not the "
-                    "same thing: whatever was held stays held.");
+    settings.header("The game's keyboard");
+    settings.keybind("chatKey", "Its chat key", config().gameChatKey,
+                     "Which key opens the game's own chat. While a message is being "
+                     "written the client holds back its own binds that would type a "
+                     "letter, so the letter reaches the sentence instead of the menu.");
 
     settings.header("Window");
-    settings.toggle("rememberPosition", "Remember the position", true);
-    settings.position("windowPosition", "Position", {0.5f, 0.5f});
     settings.toggle("dimBackground", "Dim the game", true);
     settings.slider("dimAmount", "Strength", 0.45f, 0.f, 0.9f);
     settings.toggle("blurBackground", "Blur the background", true);
@@ -221,10 +219,9 @@ void ClickGui::onRender(RenderTopEvent& event) {
 
     // Same reasoning as the language above: read from this module's own settings, on
     // the thread that acts on them.
-    if (const bool suspend = settings.value<bool>("suspendGame", true);
-        suspend != WindowHook::suspendsGame()) {
-        WindowHook::setSuspendGame(suspend);
-        config().suspendGame = suspend;
+    if (const Keybind chat = settings.value<Keybind>("chatKey", config().gameChatKey);
+        chat.key != config().gameChatKey.key) {
+        config().gameChatKey = chat;
         config().save();
     }
 
@@ -243,8 +240,10 @@ void ClickGui::onRender(RenderTopEvent& event) {
                           active.backgroundDeep.withAlpha(amount));
     }
 
-    const Vec2 stored = settings.value<Vec2>("windowPosition", {0.5f, 0.5f});
-    const Vec2 centre{stored.x * event.screenSize.x, stored.y * event.screenSize.y};
+    // Pinned to the middle of the screen. It used to be draggable and remembered where
+    // it had been left, which is one more thing to lose off the edge of a game that has
+    // just been resized, and one more thing to get wrong in the dark.
+    const Vec2 centre{event.screenSize.x * 0.5f, event.screenSize.y * 0.5f};
 
     const float width = std::min(kWindowWidth, event.screenSize.x - 40.f);
     const float height = std::min(kWindowHeight, event.screenSize.y - 40.f);
@@ -339,26 +338,11 @@ void ClickGui::drawHeader(const Rect& rect) {
              Rect{rect.left + 120.f, rect.top, rect.left + 184.f, rect.bottom}, active.textDim,
              10.5f, FontWeight::Regular);
 
-    const Rect close{rect.right - 46.f, rect.center().y - 14.f, rect.right - 18.f,
-                     rect.center().y + 14.f};
-    if (gui.iconButton(UiId("close"), close, "✕", active.textMuted)) setEnabled(false);
-
-    const Rect dragArea{rect.left, rect.top, close.left - 8.f, rect.bottom};
-    if (gui.clicked() && dragArea.contains(gui.mouse())) {
-        dragging_ = true;
-        dragOffset_ = gui.mouse() - window_.center();
-    }
-    if (!gui.mouseDown()) dragging_ = false;
-
-    if (dragging_ && settings.value<bool>("rememberPosition", true)) {
-        const Vec2 screen = Velyx::get().screenSize();
-        if (screen.x > 0.f && screen.y > 0.f) {
-            const Vec2 centre = gui.mouse() - dragOffset_;
-            settings.set("windowPosition",
-                         SettingValue{Vec2{clamp(centre.x / screen.x, 0.05f, 0.95f),
-                                           clamp(centre.y / screen.y, 0.05f, 0.95f)}});
-        }
-    }
+    // The way back to the game for anyone who would rather not remember which key it
+    // was bound to.
+    const Rect close{rect.right - 48.f, rect.center().y - 15.f, rect.right - 18.f,
+                     rect.center().y + 15.f};
+    if (gui.closeButton(UiId("close"), close)) setEnabled(false);
 }
 
 void ClickGui::drawSidebar(const Rect& rect) {
@@ -574,9 +558,16 @@ void ClickGui::drawModuleGrid(const Rect& rect) {
                                       card.top + 30.f},
                  lerp(active.textMuted, active.text, on), 14.f, FontWeight::SemiBold);
 
-        gui.text(module->description(), Rect{card.left + 16.f, card.top + 28.f, card.right - 74.f,
-                                             card.bottom - 8.f},
-                 active.textMuted, 11.5f, FontWeight::Regular);
+        // A module that cannot act says so where it is switched on, rather than
+        // letting the switch look like it did something.
+        const std::string blocked = module->inertReason();
+        const Rect line{card.left + 16.f, card.top + 28.f, card.right - 74.f, card.bottom - 8.f};
+
+        if (blocked.empty()) {
+            gui.text(module->description(), line, active.textMuted, 11.5f, FontWeight::Regular);
+        } else {
+            gui.text(blocked, line, active.warning.fade(0.9f), 11.5f, FontWeight::Medium);
+        }
 
         const Rect gear{card.right - 70.f, card.center().y - 14.f, card.right - 42.f,
                         card.center().y + 14.f};

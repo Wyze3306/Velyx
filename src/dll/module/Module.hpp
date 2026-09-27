@@ -80,6 +80,17 @@ public:
 
     [[nodiscard]] bool experimental() const { return experimental_; }
 
+    // Why this module cannot do anything right now, or empty when it can. A module
+    // that reads the game is not broken on a build with no signature pack — it is
+    // waiting — and the difference is invisible unless the menu says it.
+    [[nodiscard]] std::string inertReason() const;
+
+    // Whether it can do anything at all right now. A module whose handlers have teeth
+    // — one that cancels an event rather than merely reading it — has to ask this
+    // itself: the menu saying it is waiting does not stop its subscriptions running,
+    // and half a feature is often worse than none.
+    [[nodiscard]] bool inert() const { return !inertReason().empty(); }
+
     [[nodiscard]] const ModulePermissions& permissions() const { return permissions_; }
 
     Keybind& keybind() { return keybind_; }
@@ -112,6 +123,32 @@ protected:
         essential_ = true;
     }
     void markExperimental() { experimental_ = true; }
+
+    // Reads the game through the SDK, so it needs a pack that reaches the client
+    // instance. Says nothing about which offsets: missing one of those makes a
+    // reading show as unknown, not the whole module go quiet.
+    void markNeedsGame() { needsGame_ = true; }
+
+    // For a module that has nothing to draw without the list of actors. Kept apart
+    // from needsGame: the pack can find the game and still not know what is in it,
+    // and drawing nothing while saying nothing is the worst of both.
+    void markNeedsEntities() {
+        needsGame_ = true;
+        needsEntities_ = true;
+    }
+
+    // Waits on something no hook emits yet. The name is what the menu shows, so it
+    // is the thing a person would recognise: "the FOV hook", not "FovEvent".
+    void markWaitingFor(std::string what) { waitingFor_ = std::move(what); }
+
+    // Waits on a hook that exists but may not have found its footing — GameInput is
+    // there or it is not, and which one is not known while the catalogue is being
+    // built. So the answer is asked for every time the menu draws rather than stored.
+    void markWaitingUnless(std::string what, std::function<bool()> ready) {
+        waitingFor_ = std::move(what);
+        waitingReady_ = std::move(ready);
+    }
+
     ModulePermissions& mutablePermissions() { return permissions_; }
 
 private:
@@ -134,6 +171,10 @@ private:
     bool essential_ = false;
     bool interfaceModule_ = false;
     bool experimental_ = false;
+    bool needsGame_ = false;
+    bool needsEntities_ = false;
+    std::string waitingFor_;
+    std::function<bool()> waitingReady_;
 };
 
 }

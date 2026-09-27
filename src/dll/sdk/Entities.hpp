@@ -21,6 +21,11 @@ public:
 
     [[nodiscard]] bool available() const { return available_; }
 
+    // Whether the pack carries the two offsets without which there can be no list at
+    // all: where the level keeps its actors, and where an actor keeps its position.
+    // A pack can find the game perfectly well and still know nothing of what is in it.
+    [[nodiscard]] static bool packSeesActors();
+
     [[nodiscard]] const std::vector<Actor>& list() const { return actors_; }
 
     // How much of the list was thrown away because it was longer than the cap. Shown
@@ -34,6 +39,11 @@ public:
     [[nodiscard]] const Actor* underCrosshair(float maxDistance, float coneDegrees) const;
 
     [[nodiscard]] const Actor* find(uintptr_t address) const;
+
+    // One entity read off an address the game named, for a hit on something the list
+    // does not hold — or on a pack that cannot walk the list at all. Goes through the
+    // same guards as the snapshot and measures the distance the same way.
+    bool read(uintptr_t address, Actor& out) const;
 
     [[nodiscard]] int count(ActorKind kind) const;
 

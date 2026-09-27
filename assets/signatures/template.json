@@ -1,6 +1,8 @@
 {
   "_comment": "Velyx signature pack template. Copy it to <major.minor>.json (for example 1.21.json) and fill in the patterns. See README.md.",
 
+  "_kinds": "An entry is a pattern (\"direct\": the match is the target), or an object with a \"kind\": \"relative\" follows the rip-relative displacement at \"operand\" of a \"length\"-byte instruction; \"anchor\" names the function that carries the assertion \"text\", with no byte of code in it; \"vtable\" reads \"slot\" of the vtable another entry names. \"pattern\" may be a list of alternatives, tried in order — for two builds of one version. \"function\": true walks from a match to the start of the function containing it.",
+
   "signatures": {
     "ClientInstance::instance": {
       "pattern": "",
@@ -9,8 +11,36 @@
       "length": 7
     },
     "LocalPlayer::sendChatMessage": { "pattern": "" },
-    "GuiData::displayClientMessage": { "pattern": "" }
+    "GuiData::displayClientMessage": { "pattern": "" },
+
+    "_comment_chat": "Optional, one of the two. Older builds: void(GuiData* self, std::string const& sender, std::string const& message), the last call before a received line is drawn. From 1.26.50: void GuiData::addMessage(GuiMessage message, int kind), which every display call ends in and which destroys the message; it needs the two string offsets below, the GuiMessage destructor and the allocator global. With either the client can read the chat, badge a name, censor a word or drop a line; without them nothing in Velyx hears the chat at all.",
+    "GuiData::displayChatMessage": { "pattern": "" },
+    "GuiData::addMessage": { "pattern": "" },
+    "GuiMessage::~GuiMessage": { "pattern": "", "kind": "relative", "operand": 1, "length": 5 },
+    "Bedrock::allocator": { "pattern": "", "kind": "relative", "operand": 3, "length": 7 },
+
+    "_comment_player_vtable": "Optional. The LocalPlayer's vtable, loaded by a lea at the top of its constructor. With it Velyx finds the player as the object that starts with it, off the frame, and needs no localPlayer offset.",
+    "LocalPlayer::vtable": { "pattern": "", "kind": "relative", "operand": 3, "length": 7 },
+
+    "_comment_turn": "Optional. void(LocalPlayer* self, Vec2 const& delta), the game's own door for the mouse: delta.x is the pitch and delta.y the yaw, in degrees. With it every turn is shaped in the game's units on every machine, SnapLook lands exactly, and the player object announces itself on the first turn — no localPlayer offset needed.",
+    "LocalPlayer::applyTurnDelta": { "pattern": "" },
+
+    "_comment_fov": "Optional, one of the two. Older builds ask float getFov(LevelRendererPlayer* self, float, ...) for what to draw with; newer ones compute it into a camera component and only setupCamera(mce::Camera&, float) turns it into a projection, which the hook then rescales — that one needs the mce::Camera and MatrixStack offsets below. Either way Zoom, Custom FOV and Dynamic FOV work, and the derived camera projects through the real field of view.",
+    "LevelRendererPlayer::getFov": { "pattern": "" },
+    "_comment_fov_tangent": "Optional, preferred over setupCamera. The call inside setupCamera that takes tanf of half the field of view, `call [rip+x]` through the import: the hook answers that one call with the tangent of the field of view the handlers asked for, so the projection is built with it.",
+    "LevelRendererPlayer::fovTangent": { "pattern": "", "addend": 0 },
+    "LevelRendererPlayer::setupCamera": { "kind": "anchor", "text": "void LevelRendererPlayer::setupCamera(mce::Camera &, const float)" },
+
+    "_comment_perspective": "Optional. int(void* self), 0 first person, 1 third person from behind, 2 from the front, asked every time the game needs to know. With it FreeLook can switch to third person and the perspective modules answer.",
+    "Options::getViewPerspective": { "pattern": "" },
+
+    "_comment_attack": "Optional. void(GameMode* self, Actor& target, bool), run the moment one of the player's hits registers. With it the hit marker, the reach readout, the target card and the hit colour work without the entity list. Easiest as a slot of the GameMode vtable, which the constructor names.",
+    "GameMode::vtable": { "pattern": "", "kind": "relative", "operand": 3, "length": 7 },
+    "GameMode::attack": { "kind": "vtable", "vtable": "GameMode::vtable", "slot": 14 }
   },
+
+  "_comment_builds": "Entries for one exact build, read over the ones above when the game reports that version: { \"1.26.51.1\": { \"signatures\": { ... }, \"offsets\": { ... } } }.",
+  "builds": {},
 
   "offsets": {
     "ClientInstance::localPlayer": -1,
@@ -44,6 +74,17 @@
     "RakNetConnector::ping": -1,
 
     "_comment_level": "A std::vector<Actor*>: begin at the offset, end eight bytes later. Everything in the Combat category reads through this one entry.",
-    "Level::runtimeActorList": -1
+    "Level::runtimeActorList": -1,
+
+    "_comment_camera_stack": "Only with LevelRendererPlayer::setupCamera. Where mce::Camera keeps its projection stack, and how a MatrixStack is laid out: an array of matrix pointers, its capacity (a power of two), the head and the count; the top is storage[(head + count - 1) & (capacity - 1)].",
+    "mce::Camera::projectionStack": -1,
+    "MatrixStack::storage": -1,
+    "MatrixStack::capacity": -1,
+    "MatrixStack::head": -1,
+    "MatrixStack::count": -1,
+
+    "_comment_message": "Only with GuiData::addMessage: where the GuiMessage it receives keeps the sender's name and the line, both std::string.",
+    "GuiMessage::author": -1,
+    "GuiMessage::message": -1
   }
 }

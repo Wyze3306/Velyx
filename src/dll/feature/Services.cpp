@@ -230,7 +230,6 @@ void SessionStats::flush() {
         Log::debug(kLog, "recorded match on {} ({}s)", server_, durationSeconds);
     }
 
-    Playtime::get().add(durationSeconds);
 
     kills_ = 0;
     deaths_ = 0;

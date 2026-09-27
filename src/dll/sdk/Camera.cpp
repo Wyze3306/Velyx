@@ -37,8 +37,15 @@ void Camera::requireSignatures() {
 }
 
 void Camera::setCalibration(float fieldOfView, float eyeHeight) {
-    fov_ = clamp(fieldOfView, 30.f, 150.f);
+    const float known = gameFov_.load(std::memory_order_acquire);
+    fov_ = known > 0.f ? known : clamp(fieldOfView, 30.f, 150.f);
     eyeHeight_ = clamp(eyeHeight, 0.f, 3.f);
+}
+
+void Camera::setGameFov(float degrees) {
+    if (degrees == 0.f || (degrees > 10.f && degrees < 179.f)) {
+        gameFov_.store(degrees, std::memory_order_release);
+    }
 }
 
 void Camera::onFrame(FrameEvent& event) {
@@ -95,7 +102,12 @@ bool Camera::readGameMatrix() {
 void Camera::derive() {
     const PlayerState& player = game().player();
 
-    if (!exact_) origin_ = {player.position.x, player.position.y + eyeHeight_, player.position.z};
+    if (!exact_) {
+        origin_ = {player.position.x, player.position.y + eyeHeight_, player.position.z};
+        if (const float known = gameFov_.load(std::memory_order_acquire); known > 0.f) {
+            fov_ = known;
+        }
+    }
 
     forward_ = lookVector(player.yaw, player.pitch);
 

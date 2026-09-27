@@ -37,9 +37,10 @@ DllMain
        ├─ Signatures::resolveAll()       scan, or reuse the disk cache
        ├─ ThemeManager::load()
        ├─ bindServices()                 clicks, frame times, stats, privacy
+       ├─ bindPresence()                 who else here is running Velyx
        ├─ ModuleManager::initialize()    builds the catalogue
        ├─ ProfileManager::load()         and applies the active profile
-       └─ HookManager::installAll()      swapchain and window
+       └─ HookManager::installAll()      swapchain, window, input, chat
 ```
 
 From then on the client lives on the game's render thread, inside the Present
@@ -152,6 +153,198 @@ Two properties are worth knowing:
 2. **A disabled module costs nothing.** `Module::on()` registers a subscription
    *factory*, not the subscription. It is created on enable and destroyed on
    disable, which is what makes a large catalogue viable.
+
+## Finding other Velyx users
+
+There is no server behind Velyx, no account and no directory, so the question
+"who else here is running this?" has only two honest answers, and `Presence`
+holds both.
+
+```
+Presence
+ ├─ chat handshake        [Velyx] <version> <name>, said once per world
+ │    ├─ sent   sdk::Game::sendChat, six seconds after joining
+ │    └─ heard  ChatReceiveEvent, cancelled so nobody ever sees it
+ └─ the roster            %APPDATA%/Velyx/cache/presence/<pid>.json
+      ├─ written every three seconds by every running client
+      └─ read on the same tick, entries older than fifteen seconds ignored
+```
+
+The two differ in more than mechanism. The handshake reaches anyone on the
+server and costs a chat message the server logs; the roster reaches only the
+instances this launcher started on this machine and costs nothing at all. Both
+are off until the `velyx_users` module is on, and the setting that *sends* is a
+separate one from the setting that *listens*.
+
+Three things are worth knowing:
+
+* **Answering is what makes one line enough.** Whoever arrives says it, whoever
+  was already there says it back — once, because a client that has already
+  spoken in this world stays quiet. A server with ten Velyx users costs ten
+  lines, not a hundred.
+* **Nothing crosses a thread boundary un-owned.** The handshake is heard on the
+  game's thread inside the chat detour, the roster on its own thread, and both
+  do no more than push a name into a queue behind a mutex. `PeerFoundEvent` is
+  emitted from the frame, which is the only place a handler may notify or draw.
+* **The registry answers one question**, `knows(name)`, and does not decide what
+  that looks like. The chat inserts a formatted tag in front of the sender; the
+  nametag draws a coloured chip inside the pill and shifts the name to make room.
+  Neither knows about the other.
+
+## Chat
+
+`ChatHook` stands on the last call before a received line is drawn and turns it
+into `ChatReceiveEvent`. On older builds that is `GuiData::displayChatMessage`,
+which takes the sender and the message as two `const&` strings. From 1.26.50 every
+display call builds a `GuiMessage` and passes it by value to `GuiData::addMessage`,
+which destroys it: the hook reads the two strings out of it, destroys a dropped line
+itself with the game's own `GuiMessage` destructor, and gives a rewritten line new
+strings from the game's heap (`memory::assignGameString`, through the allocator the
+pack names), because the game is the one that frees them. Either way the sender and
+the message are both rewritable, which is what lets a handler badge a name, censor a
+word, or drop the line by cancelling; anything a handler leaves alone reaches the
+game byte for byte.
+
+Two details, both learned the hard way:
+
+* **The game's `std::string` is not necessarily ours.** Bedrock is built with
+  MSVC and `Velyx.dll` may not be, so every string crossing the line goes
+  through `memory::readString` and `memory::GameString`, which lay out sixteen
+  bytes of buffer, a size and a capacity by hand. Passing the client's own
+  `std::string` across worked only as long as both were built by the same
+  compiler.
+* **The detour runs on the game's thread.** An exception escaping it reaches no
+  handler at all and ends the process through `std::terminate`, so every
+  listener runs inside a `try` and a throw costs the line its rewrite, nothing
+  more.
+
+## The game's own functions
+
+Five hooks stand on functions of the game itself, each behind a pack entry and each
+optional: missing, it costs the modules that listen for its event and nothing else.
+`hooks::declareSignatures` names them to the registry before the pack is read, so
+the Diagnostics page lists them with everything else.
+
+| Hook | Stands on | Emits |
+| --- | --- | --- |
+| `TurnHook` | `LocalPlayer::applyTurnDelta` | `TurnDeltaEvent`, in the game's own degrees; also names the player object |
+| `FovHook` | `LevelRendererPlayer::getFov` where a build has it; otherwise the C runtime's `tanf`, answering only the two calls the camera takes the tangent of the field of view through; `LevelRendererPlayer::setupCamera` as a last resort | `FovEvent`, in degrees whichever |
+| `PerspectiveHook` | `Options::getViewPerspective`, which the camera asks once a frame | `PerspectiveEvent` |
+| `AttackHook` | `GameMode::attack`, a vtable slot, or the function behind the slot where a build moved it | nothing itself: it hands the target to `sdk::Signals` |
+| `ChatHook` | `GuiData::addMessage` or `GuiData::displayChatMessage`, above | `ChatReceiveEvent` |
+
+The camera door deserves a word. Since 1.21.100 the game does not ask anyone what
+field of view to draw with: a system computes it into `CameraComponent`, and two
+functions build a projection from it, `setupCamera` and the one it hands the
+component to, which builds the projection the frame is actually drawn with. Both
+take `tanf` of half the field of view through the same import. So the hook stands on
+`tanf` and answers differently only for those two callers, recognised by the address
+they return to: the game builds both projections, near and far planes and all, with
+the field of view the handlers asked for. The first attempt rescaled the matrix
+after `setupCamera` returned, which reads correctly in the log and changes nothing
+on screen, because the frame is drawn from the copy made inside it; that road is
+kept only for a pack that names `setupCamera` and nothing better.
+
+What the game says nothing about is read rather than heard. `sdk::Signals` watches
+the snapshot every frame: the player's health dropping is `HurtEvent`, reaching zero
+`DeathEvent`, coming back `RespawnEvent`; an entity's health dropping is
+`ActorHurtEvent`; the screen name changing is `ScreenChangeEvent`; and twenty times a
+second there is a `TickEvent`. The one thing heard is the hit: `GameMode::attack`
+runs on the game's thread the moment a hit registers, the hook only remembers the
+target, and the next frame turns it into `AttackEvent` and `ActorHurtEvent` with an
+entity a handler can draw over — this frame's snapshot entry, or a copy read off the
+address the game named when the pack cannot walk the list.
+
+### Three roads to the player
+
+`ClientInstance::localPlayer` is an offset no pack carries yet, so the SDK takes
+whichever road the pack opens: the offset; the turn hook, which is called on the
+LocalPlayer and names it on the first turn; the LocalPlayer's own vtable, which a
+thread of its own looks for on the heap while the player is wanted and unknown; and
+the GameMode, which keeps its player at `+8` and names it on the first hit. All four
+land in `Game::adoptLocalPlayer`, which keeps the object for as long as it still
+starts with the vtable it had.
+
+### What survives a rebuild
+
+A pattern entry may be a list of alternatives, tried until one matches exactly once,
+which is how one `1.26.json` covers a release and a Preview. Two kinds carry no byte
+of code at all: an **anchor** names the function that carries an assertion string —
+the string is found in `.rdata`, the one instruction referencing it in `.text`, and
+the function around it in the exception table — and a **vtable slot** reads an entry
+of a vtable another signature names. `"function": true` walks from any match to the
+start of its function, so a distinctive instruction in the middle of one can name it.
+
+Two facts about the builds Velyx runs on, learned on 2026-09-09 and 2026-09-12: the
+Xbox app builds (`gamecore_x64_desktop`) are compiled almost without stack cookies,
+so every published pattern that carries the cookie load fails on them; and the
+release strips its assertion strings while the Preview keeps them, so anchors work on
+the Preview and patterns are the only way in on the release.
+
+## The mouse
+
+Every turn the player makes passes through `velyx::turn` before the game hears about
+it. What made that worth building as its own thing is that the *door* is not the same
+on every machine:
+
+```
+Windows            IGameInputReading::GetMouseState   running totals
+WineGDK            GetRawInputData / GetRawInputBuffer per-event deltas
+                                  │
+                                  ▼
+                          velyx::turn::shape
+                       ├─ emit TurnDeltaEvent          degrees, one constant each way
+                       ├─ cancelled → nothing moves
+                       ├─ + whatever a module asked for after the event, never scaled
+                       └─ keep the fraction owed
+```
+
+Bedrock reads the mouse through Microsoft GameInput on Windows. Under WineGDK the
+redistributable is present and answers — the client can even create an instance and
+patch the reading's vtable off it — but the game never asks it for anything, taking its
+mouse off the message pump instead. `GameInputHook` and `UserInputHook` therefore both
+hand their movement to the same shaper, and a module scales, smooths or cancels a turn
+without knowing which door was used.
+
+That distinction is the trap, and it cost a wrong diagnosis once: **being able to hook a
+door is not the game walking through it.** The log line that says the readings will come
+out empty is written by the probe at install time and proves only that the
+redistributable is here. Only a reading the game itself asked for calls `markCarried`,
+and only that makes `carried()` true — which is what the sensitivity multiplier, the
+cinematic camera and SnapLook check before claiming they can do anything.
+
+Neither door needs a signature. GameInput belongs to the redistributable and raw input
+to user32, so nothing here moves when the game rebuilds — which is why these modules
+work on a build whose pack is otherwise empty.
+
+Four details are load-bearing:
+
+* **The movement comes from the device, never from what the game was last told.**
+  GameInput hands out running totals, so the delta is taken against the device's own
+  previous total; feeding a scaled turn back in as the next baseline compounds the
+  multiplier every frame.
+* **Fractions are kept.** Whole counts are all a reading or a raw input message can
+  carry, so a multiplier below one would round every small movement to nothing and the
+  mouse would feel stuck rather than slow. The remainder is paid into the next one.
+* **An untouched axis is passed through untouched.** Degrees are a `float`; an axis that
+  goes out through the constant and back unchanged still loses a count to rounding, so
+  the identity case is spotted and short-circuited.
+* **An injected turn is added after the event.** A scripted about-face is an angle
+  already decided on, and has no business passing under the player's own sensitivity
+  multiplier on the way out.
+
+What the constant cannot do is tell you what a count is worth. That is the game's own
+sensitivity slider, and measuring it needs `Actor::rotation`, which no pack carries
+yet. Nothing that only scales or smooths a turn is affected — the value cancels — so it
+costs exactly one module, SnapLook, a calibration setting until the offset lands.
+
+FreeLook stands on the same pipeline: while the key is held it records what the game
+applies, last in line so that it records the shaped value, and when the key goes up it
+asks for the exact opposite — through the game door in degrees, through an input door
+in counts, and exact either way because the way back goes out through the same
+constant the way out came in by. The automatic perspective still waits: the
+perspective hook answers the game's question, but which state the player is in —
+swimming, gliding, riding — is a flag no pack carries an offset for yet.
 
 ## Modules
 

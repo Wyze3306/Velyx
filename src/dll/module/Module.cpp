@@ -1,6 +1,9 @@
 #include "Module.hpp"
 
 #include "core/Log.hpp"
+#include "dll/module/ModuleManager.hpp"
+#include "dll/sdk/Entities.hpp"
+#include "dll/sdk/Game.hpp"
 
 namespace velyx {
 namespace {
@@ -55,6 +58,41 @@ Module::Module(std::string id, std::string name, ModuleCategory category, std::s
 Module::~Module() {
 
     events().offOwner(this);
+}
+
+std::string Module::inertReason() const {
+    // Safe mode comes first because it is the thing actually in the way: it swallows
+    // every enable that is not an interface, and from the switch that is
+    // indistinguishable from a module that simply does not work.
+    if (modules().safeMode() && !essential_) {
+        return "Safe mode, after the client crashed twice";
+    }
+
+    // Then order matters: a module waiting on a hook stays quiet whatever the pack
+    // knows, so that is the honest answer even when the game is perfectly reachable.
+    if (!waitingFor_.empty() && !(waitingReady_ && waitingReady_())) {
+        return "Waiting for " + waitingFor_;
+    }
+
+    if (needsGame_ && !sdk::Game::reachable()) {
+        return "Needs a signature pack for this build of the game";
+    }
+    if (needsGame_ && !sdk::game().available()) {
+        return "Waiting for the game";
+    }
+    // Reaching the client instance and reaching the player are two different things,
+    // and the gap between them is invisible from the outside: every reading comes back
+    // empty and the element draws a row of zeroes as though that were the answer.
+    if (needsGame_ && !sdk::Game::packSeesPlayer()) {
+        return "The pack finds the game but not the player: no localPlayer offset yet";
+    }
+    if (needsEntities_ && !sdk::Entities::packSeesActors()) {
+        return "The pack finds the game but nothing in it: no entity offsets yet";
+    }
+    if (needsEntities_ && !sdk::entities().available()) {
+        return "Waiting for the game";
+    }
+    return {};
 }
 
 void Module::addKeywords(std::vector<std::string> keywords) {

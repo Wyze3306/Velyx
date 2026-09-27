@@ -52,9 +52,37 @@ std::string readFileVersion() {
 }
 
 SignatureKind parseKind(const std::string& text) {
-    return text == "relative" ? SignatureKind::Relative : SignatureKind::Direct;
+    if (text == "relative") return SignatureKind::Relative;
+    if (text == "anchor" || text == "string") return SignatureKind::Anchor;
+    if (text == "vtable" || text == "slot") return SignatureKind::VtableSlot;
+    return SignatureKind::Direct;
 }
 
+const char* kindName(SignatureKind kind) {
+    switch (kind) {
+        case SignatureKind::Direct:     return "direct";
+        case SignatureKind::Relative:   return "relative";
+        case SignatureKind::Anchor:     return "anchor";
+        case SignatureKind::VtableSlot: return "vtable";
+    }
+    return "direct";
+}
+
+}
+
+std::string SignatureSpec::describe() const {
+    switch (kind) {
+        case SignatureKind::Anchor:
+            return std::format("anchor '{}'", text);
+        case SignatureKind::VtableSlot:
+            return std::format("{}[{}]", vtable, slot);
+        default:
+            break;
+    }
+    if (patterns.empty()) return "no pattern";
+    return std::format("{} {}{}", kindName(kind), patterns.front(),
+                       patterns.size() > 1 ? std::format(" (+{} more)", patterns.size() - 1)
+                                           : "");
 }
 
 Signatures& Signatures::get() {
@@ -96,6 +124,77 @@ void Signatures::requireOffset(std::string name, std::string owner, int fallback
     offsets_.try_emplace(std::move(name), fallback);
 }
 
+namespace {
+
+// One level of a pack: its signatures, then its offsets, read over whatever an earlier
+// level already said about the same names.
+void readSection(const nlohmann::json& document,
+                 std::unordered_map<std::string, SignatureResult>& signatures,
+                 std::unordered_map<std::string, int>& offsets, int& patternCount,
+                 int& offsetCount) {
+    if (document.contains("signatures") && document["signatures"].is_object()) {
+        for (const auto& [name, entry] : document["signatures"].items()) {
+            // A key here is read as a signature whatever it is called, so a note
+            // left in the object would be scanned as a pattern — and counted as one
+            // that failed. Names starting with an underscore are notes, the same
+            // convention the offsets already use.
+            if (name.empty() || name.front() == '_') continue;
+
+            auto it = signatures.find(name);
+            if (it == signatures.end()) {
+
+                SignatureResult placeholder;
+                placeholder.spec.name = name;
+                placeholder.spec.owner = "external";
+                it = signatures.emplace(name, std::move(placeholder)).first;
+            }
+
+            auto& spec = it->second.spec;
+            const auto readPatterns = [&spec](const nlohmann::json& value) {
+                spec.patterns.clear();
+                if (value.is_string()) {
+                    if (!value.get<std::string>().empty()) spec.patterns.push_back(value);
+                } else if (value.is_array()) {
+                    for (const auto& item : value) {
+                        if (item.is_string() && !item.get<std::string>().empty()) {
+                            spec.patterns.push_back(item);
+                        }
+                    }
+                }
+            };
+
+            if (entry.is_string()) {
+                readPatterns(entry);
+            } else if (entry.is_object()) {
+                if (entry.contains("pattern")) readPatterns(entry["pattern"]);
+                spec.kind = parseKind(entry.value("kind", std::string("direct")));
+                spec.operandOffset = entry.value("operand", spec.operandOffset);
+                spec.instructionLength = entry.value("length", spec.instructionLength);
+                spec.addend = entry.value("addend", spec.addend);
+                spec.functionStart = entry.value("function", spec.functionStart);
+                spec.text = entry.value("text", spec.text);
+                spec.vtable = entry.value("vtable", spec.vtable);
+                spec.slot = entry.value("slot", spec.slot);
+            }
+
+            // An empty entry is the template's way of listing a name; it is not a
+            // pattern that failed.
+            const bool empty = spec.patterns.empty() && spec.text.empty() && spec.vtable.empty();
+            if (!empty) ++patternCount;
+        }
+    }
+
+    if (document.contains("offsets") && document["offsets"].is_object()) {
+        for (const auto& [name, entry] : document["offsets"].items()) {
+            if (!entry.is_number_integer()) continue;
+            offsets[name] = entry.get<int>();
+            ++offsetCount;
+        }
+    }
+}
+
+}
+
 bool Signatures::loadPatterns() {
     const std::string key = gameVersionKey();
 
@@ -121,37 +220,19 @@ bool Signatures::loadPatterns() {
         }
 
         int patternCount = 0;
-        if (document.contains("signatures") && document["signatures"].is_object()) {
-            for (const auto& [name, entry] : document["signatures"].items()) {
-                auto it = signatures_.find(name);
-                if (it == signatures_.end()) {
-
-                    SignatureResult placeholder;
-                    placeholder.spec.name = name;
-                    placeholder.spec.owner = "external";
-                    it = signatures_.emplace(name, std::move(placeholder)).first;
-                }
-
-                auto& spec = it->second.spec;
-                if (entry.is_string()) {
-                    spec.pattern = entry.get<std::string>();
-                } else if (entry.is_object()) {
-                    spec.pattern = entry.value("pattern", spec.pattern);
-                    spec.kind = parseKind(entry.value("kind", std::string("direct")));
-                    spec.operandOffset = entry.value("operand", spec.operandOffset);
-                    spec.instructionLength = entry.value("length", spec.instructionLength);
-                    spec.addend = entry.value("addend", spec.addend);
-                }
-                ++patternCount;
-            }
-        }
-
         int offsetCount = 0;
-        if (document.contains("offsets") && document["offsets"].is_object()) {
-            for (const auto& [name, entry] : document["offsets"].items()) {
-                if (!entry.is_number_integer()) continue;
-                offsets_[name] = entry.get<int>();
-                ++offsetCount;
+        readSection(document, signatures_, offsets_, patternCount, offsetCount);
+
+        // A pack covers a minor version, and a build inside it that moved something
+        // carries its own entries under its exact version, read over the shared ones.
+        if (document.contains("builds") && document["builds"].is_object()) {
+            const auto build = document["builds"].find(gameVersion());
+            if (build != document["builds"].end() && build->is_object()) {
+                int buildPatterns = 0;
+                int buildOffsets = 0;
+                readSection(*build, signatures_, offsets_, buildPatterns, buildOffsets);
+                Log::info(kLog, "{} carries {} pattern(s) and {} offset(s) of its own", gameVersion(),
+                          buildPatterns, buildOffsets);
             }
         }
 
@@ -170,6 +251,106 @@ bool Signatures::loadPatterns() {
     return loadedAny;
 }
 
+uintptr_t Signatures::resolvePattern(const SignatureSpec& spec, const std::string& pattern) const {
+    const auto& text = memory::gameText();
+    const memory::Pattern compiled(pattern);
+    if (!compiled.valid()) return 0;
+
+    // Exactly one match, or none: a pattern that fits twice names nothing, and a
+    // hook on the wrong one of two is worse than no hook.
+    const std::vector<uintptr_t> matches = memory::findAll(compiled, text);
+    if (matches.size() != 1) {
+        if (matches.size() > 1) {
+            Log::debug(kLog, "'{}': pattern matched {} times, not taken", spec.name, matches.size());
+        }
+        return 0;
+    }
+
+    uintptr_t address = matches.front();
+    if (spec.kind == SignatureKind::Relative) {
+        address = memory::resolveRelative(address, spec.operandOffset, spec.instructionLength);
+    }
+    if (spec.functionStart) {
+        const uintptr_t start = memory::functionStart(address);
+        if (start == 0) {
+            Log::debug(kLog, "'{}': no function contains {:#x}", spec.name, address);
+            return 0;
+        }
+        address = start;
+    }
+    return address + static_cast<uintptr_t>(spec.addend);
+}
+
+uintptr_t Signatures::resolveAnchor(const SignatureSpec& spec) const {
+    if (spec.text.empty()) return 0;
+
+    const uintptr_t string = memory::findText(spec.text);
+    if (string == 0) {
+        Log::debug(kLog, "'{}': the anchor text is not in this build", spec.name);
+        return 0;
+    }
+
+    const uintptr_t site = memory::findReferenceTo(string, memory::gameText());
+    if (site == 0) {
+        Log::debug(kLog, "'{}': nothing in the code references the anchor text", spec.name);
+        return 0;
+    }
+
+    const uintptr_t start = memory::functionStart(site);
+    if (start == 0) {
+        Log::debug(kLog, "'{}': no function contains the anchor's reference", spec.name);
+        return 0;
+    }
+    return start + static_cast<uintptr_t>(spec.addend);
+}
+
+uintptr_t Signatures::resolveSlot(const SignatureSpec& spec) const {
+    if (spec.vtable.empty() || spec.slot < 0) return 0;
+
+    const uintptr_t vtable = address(spec.vtable);
+    if (vtable == 0) return 0;
+
+    const auto entry = memory::read<uintptr_t>(vtable + static_cast<uintptr_t>(spec.slot) * 8);
+    if (!memory::gameText().contains(entry)) {
+        Log::debug(kLog, "'{}': slot {} of {} does not point into the code", spec.name, spec.slot,
+                   spec.vtable);
+        return 0;
+    }
+    return entry + static_cast<uintptr_t>(spec.addend);
+}
+
+bool Signatures::resolveOne(SignatureResult& result) {
+    const SignatureSpec& spec = result.spec;
+
+    uintptr_t address = 0;
+    switch (spec.kind) {
+        case SignatureKind::Anchor:
+            // A retail build strips most of its assertions; an anchor entry may carry
+            // patterns for those builds, tried once the text is not there.
+            address = resolveAnchor(spec);
+            for (size_t i = 0; address == 0 && i < spec.patterns.size(); ++i) {
+                address = resolvePattern(spec, spec.patterns[i]);
+            }
+            break;
+        case SignatureKind::VtableSlot:
+            address = resolveSlot(spec);
+            break;
+        case SignatureKind::Direct:
+        case SignatureKind::Relative:
+            for (const std::string& pattern : spec.patterns) {
+                address = resolvePattern(spec, pattern);
+                if (address != 0) break;
+            }
+            break;
+    }
+
+    if (address == 0) return false;
+
+    result.address = address;
+    result.resolved = true;
+    return true;
+}
+
 void Signatures::scan() {
     using clock = std::chrono::steady_clock;
     const auto start = clock::now();
@@ -183,32 +364,31 @@ void Signatures::scan() {
     int resolvedCount = 0;
     int failedCount = 0;
 
-    for (auto& [name, result] : signatures_) {
-        if (result.resolved) continue;
-        if (result.spec.pattern.empty()) {
-            ++failedCount;
-            continue;
-        }
+    // Slots read a vtable another entry names, so they go last, once the vtables are
+    // in. Everything else is independent.
+    for (const bool slotsPass : {false, true}) {
+        for (auto& [name, result] : signatures_) {
+            if (result.resolved) continue;
+            if ((result.spec.kind == SignatureKind::VtableSlot) != slotsPass) continue;
 
-        uintptr_t address = memory::find(result.spec.pattern, text);
-        if (address == 0) {
-            ++failedCount;
-            if (result.spec.required) {
-                Log::warn(kLog, "required signature '{}' ({}) did not match", name,
-                          result.spec.owner.empty() ? "unowned" : result.spec.owner);
+            const SignatureSpec& spec = result.spec;
+            const bool empty = spec.patterns.empty() && spec.text.empty() && spec.vtable.empty();
+            if (empty) {
+                ++failedCount;
+                continue;
             }
-            continue;
-        }
 
-        if (result.spec.kind == SignatureKind::Relative) {
-            address = memory::resolveRelative(address, result.spec.operandOffset,
-                                              result.spec.instructionLength);
-        }
-        address += static_cast<uintptr_t>(result.spec.addend);
+            if (resolveOne(result)) {
+                ++resolvedCount;
+                continue;
+            }
 
-        result.address = address;
-        result.resolved = true;
-        ++resolvedCount;
+            ++failedCount;
+            if (spec.required) {
+                Log::warn(kLog, "required signature '{}' ({}) did not match", name,
+                          spec.owner.empty() ? "unowned" : spec.owner);
+            }
+        }
     }
 
     const auto elapsed =
@@ -275,7 +455,11 @@ void Signatures::resolveAll() {
     patternFingerprint.reserve(signatures_.size() * 24);
     for (const auto& [name, result] : signatures_) {
         patternFingerprint += name;
-        patternFingerprint += result.spec.pattern;
+        for (const std::string& pattern : result.spec.patterns) patternFingerprint += pattern;
+        patternFingerprint += result.spec.text;
+        patternFingerprint += result.spec.vtable;
+        patternFingerprint += std::to_string(result.spec.slot);
+        patternFingerprint += result.spec.functionStart ? "f" : "";
     }
     const std::string cacheKey =
         gameVersion() + "-" + strings::hashId(patternFingerprint).substr(0, 8);

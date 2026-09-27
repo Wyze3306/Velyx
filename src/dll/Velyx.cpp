@@ -12,12 +12,22 @@
 #include "dll/config/ClientConfig.hpp"
 #include "dll/config/ProfileManager.hpp"
 #include "dll/feature/CrashReporter.hpp"
+#include "dll/feature/NetworkMonitor.hpp"
 #include "dll/feature/Playtime.hpp"
+#include "dll/feature/Presence.hpp"
 #include "dll/feature/Services.hpp"
 #include "dll/feature/Updates.hpp"
 #include "dll/hook/HookManager.hpp"
+#include "dll/hook/hooks/AttackHook.hpp"
+#include "dll/hook/hooks/ChatHook.hpp"
+#include "dll/hook/hooks/FovHook.hpp"
+#include "dll/hook/hooks/GameHooks.hpp"
 #include "dll/hook/hooks/GameInputHook.hpp"
+#include "dll/hook/hooks/NetworkHook.hpp"
+#include "dll/hook/hooks/PerspectiveHook.hpp"
 #include "dll/hook/hooks/SwapChainHook.hpp"
+#include "dll/hook/hooks/TurnHook.hpp"
+#include "dll/hook/hooks/UserInputHook.hpp"
 #include "dll/hook/hooks/WindowHook.hpp"
 #include "dll/memory/Signatures.hpp"
 #include "dll/module/ModuleManager.hpp"
@@ -25,6 +35,7 @@
 #include "dll/render/GraphicsContext.hpp"
 #include "dll/sdk/Entities.hpp"
 #include "dll/sdk/Game.hpp"
+#include "dll/sdk/Signals.hpp"
 #include "dll/ui/Theme.hpp"
 #include "dll/ui/Ui.hpp"
 
@@ -113,8 +124,6 @@ void Velyx::bootstrap() {
 
     crash::install();
 
-    WindowHook::setSuspendGame(settings.suspendGame);
-
     const bool safeMode = settings.shouldStartInSafeMode();
     if (safeMode) {
         Log::warn(kLog, "starting in safe mode after {} crashes", settings.crashStreak);
@@ -122,22 +131,34 @@ void Velyx::bootstrap() {
 
     sdk::bindGame();
     sdk::bindWorld();
+    sdk::bindSignals();
+
+    // The game functions the hooks stand on, declared before the pack is read so that
+    // a pack can fill them in and the Diagnostics page lists them.
+    hooks::declareSignatures();
 
     Signatures& signatures = Signatures::get();
     Log::info(kLog, "Minecraft {}", signatures.gameVersion());
     signatures.resolveAll();
 
-    if (!signatures.healthy()) {
+    if (!sdk::Game::reachable()) {
         Log::warn(kLog,
-                  "some signatures are missing; modules that read the game stay in reduced "
-                  "mode (see assets/signatures/)");
+                  "no route to the client instance in this pack; everything that reads the "
+                  "game stays in reduced mode (see assets/signatures/)");
+    } else if (!signatures.healthy()) {
+        Log::warn(kLog,
+                  "some signatures are missing; the features that need them stay quiet "
+                  "(see assets/signatures/)");
     }
 
     ThemeManager::get().load();
     ThemeManager::get().apply(settings.theme);
 
     bindServices();
+    bindPresence();
+    NetworkMonitor::get().bind();
     Playtime::get().load();
+    Playtime::get().bind();
     updates::check(settings.updateChannel);
 
     ModuleManager& manager = modules();
@@ -162,6 +183,16 @@ void Velyx::bootstrap() {
     hooks.add<SwapChainHook>();
     hooks.add<WindowHook>();
     hooks.add<GameInputHook>();
+    hooks.add<UserInputHook>();
+    hooks.add<ChatHook>();
+    hooks.add<NetworkHook>();
+
+    // The game's own functions, each behind a signature the pack may or may not carry.
+    // Missing, each costs the modules that listen for its event and nothing else.
+    hooks.add<TurnHook>();
+    hooks.add<FovHook>();
+    hooks.add<PerspectiveHook>();
+    hooks.add<AttackHook>();
 
     SwapChainHook::setPresentCallback([this](IDXGISwapChain* swapChain) { onPresent(swapChain); });
 
@@ -367,6 +398,7 @@ void Velyx::shutdown() {
     updates::shutdown();
     WindowHook::setCaptureInput(false);
 
+    sdk::game().shutdown();
     modules().shutdown();
     events().clear();
 
