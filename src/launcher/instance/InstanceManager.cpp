@@ -215,7 +215,9 @@ bool enableBackupPrivilege() {
     privileges.PrivilegeCount = 1;
     privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
 
-    const bool ok = LookupPrivilegeValueW(nullptr, SE_BACKUP_NAME,
+    // Spelled out wide: SE_BACKUP_NAME goes through TEXT(), which is narrow on a build
+    // that does not define UNICODE, and MSVC's is one of them.
+    const bool ok = LookupPrivilegeValueW(nullptr, L"SeBackupPrivilege",
                                           &privileges.Privileges[0].Luid) &&
                     AdjustTokenPrivileges(token, FALSE, &privileges, 0, nullptr, nullptr) &&
                     GetLastError() == ERROR_SUCCESS;
