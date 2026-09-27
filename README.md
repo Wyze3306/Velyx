@@ -2,8 +2,9 @@
 
 # Velyx
 
-A utility client for Minecraft Bedrock Edition: an injected DLL plus a launcher
-that runs several game instances side by side, each on its own Microsoft account.
+A utility client for Minecraft Bedrock Edition: an injected DLL, plus a launcher
+that runs several copies of the game side by side, each signed in to its own
+Microsoft account.
 
 [![build](https://github.com/Wyze3306/Velyx/actions/workflows/build.yml/badge.svg)](https://github.com/Wyze3306/Velyx/actions/workflows/build.yml)
 [![licence](https://img.shields.io/badge/licence-GPL--3.0-3DDC84)](LICENSE)
@@ -14,97 +15,117 @@ that runs several game instances side by side, each on its own Microsoft account
 </div>
 
 Velyx ships as a single `Velyx.exe`. The client, the fonts and the signature
-template travel inside it and land in `%APPDATA%\Velyx` the first time you run
-it, so there is no folder to keep together and nothing to install.
+template are packed inside it and get copied to `%APPDATA%\Velyx` the first time
+you run it. There is nothing to install and no folder to keep next to the exe.
 
 ## What it does
 
-**In game.** The interface is in English, with French shipped as a translation table
-(`assets/lang/fr.json`) you pick from the menu — add a file to add a language. One
-menu with fuzzy search over every module and every setting —
-`Ctrl+K` opens it straight on that search — a HUD editor with grid snapping,
-alignment guides and element groups, a live theme editor, and a notification
-centre.
+**In game.** The interface is in English, and French comes as a translation table
+(`assets/lang/fr.json`) you can pick from the menu. Adding a language means adding
+a file. The menu has a fuzzy search over every module and every setting (`Ctrl+K`
+opens it directly on the search), a HUD editor with grid snapping, alignment
+guides and element groups, a live theme editor and a notification centre.
 
-**Profiles.** A profile carries the modules and the HUD, and nothing else: how the
-interface itself looks is the client's, the same whichever profile is active. Velyx
-ships four to start from — Global, PvP, Performance, Survival — keeps restore points,
-and exports either a profile or a theme as a single line you can paste to a friend.
+**Profiles.** A profile holds the modules and the HUD layout. The look of the
+interface belongs to the client and stays the same whatever profile is active.
+Four profiles come with it (Global, PvP, Performance, Survival). You can keep
+restore points and export a profile or a theme as one line of text to send to a
+friend.
 
-**61 modules.** Movement and camera, HUD readouts, a crosshair designer,
-accessibility, screen filters including colour blindness aids, screenshots with a
-thumbnail gallery, clip markers, benchmark, privacy and streamer modes — plus:
+**62 modules.** Movement and camera, HUD readouts, a crosshair designer,
+accessibility options, screen filters (colour blindness aids included),
+screenshots with a thumbnail gallery, clip markers, a benchmark, and privacy and
+streamer modes. On top of that:
 
 *Combat.* Hitboxes over players and mobs in four styles, nametags with health,
-tracers, a target card whose bar trails the damage you just did, a radar that
-turns with you, a hit marker with a streak counter, a reach readout and a
-low-health alert around the edge of the screen.
+tracers, a target card with a health bar that trails the damage you just dealt, a
+radar that turns with you, a hit marker with a streak counter, a reach readout,
+and a low health warning around the edge of the screen.
 
-*Performance.* A frame limiter that paces against the clock and caps separately
-when the window is not in front of you, process tuning (priority, performance
-cores, one millisecond timer), a system monitor reading processor, memory and
-video memory, and an overlay cost readout that says in microseconds what Velyx
-itself is charging you per frame.
+*Performance.* A frame limiter that paces against the clock and can use a lower
+cap when the window is in the background, process tuning (priority, performance
+cores, 1 ms timer), a system monitor for processor, memory and video memory, and
+an overlay cost readout that shows how many microseconds Velyx itself takes per
+frame.
 
-*The rest.* Fullbright done through the overlay's own colour matrix rather than
-through the game, waypoints that keep pointing at a place from the edge of the
-screen, chat macros, and coordinates copied or announced in one press.
+*The rest.* Fullbright done with the overlay's colour matrix instead of touching
+the game, waypoints that stay visible at the edge of the screen, chat macros,
+coordinates you can copy or post in chat with one key, and a badge next to other
+people who use Velyx.
 
-**Instances.** The launcher builds isolated copies of the game so you can run
-several at once, one account each, with the client injected on launch.
+**Instances.** The launcher makes isolated copies of the game so you can run
+several at the same time, each with its own account, and injects the client when
+it starts them.
 
-It also keeps a crash report that names the module that was running, checks
-GitHub for new releases, and walks you through a short setup on first launch.
+**Other Velyx users.** There is no server listing them and no account to create.
+Velyx finds them in two ways. On a server, a client posts one line in the chat a
+few seconds after joining. Other Velyx clients read it, hide it so nobody sees it,
+and reply once if they have not posted yet. Instances running on your own machine
+find each other through a local file, so nothing is sent at all. Everyone found
+this way gets a badge before their name in the chat and on their nametag.
+
+Velyx also writes a crash report that names the module that was running, checks
+GitHub for new releases, and walks you through a short setup the first time.
 
 ## Signature packs
 
-Velyx contains no Minecraft memory addresses. Everything it reads from the game
-goes through a symbolic name resolved at startup from
-`assets/signatures/<version>.json`, so a Bedrock update needs a new JSON file
-rather than a rebuild. A missing signature disables the feature that needs it and
-says so on the Diagnostics page instead of taking the game down.
+Velyx has no Minecraft memory addresses built in. Everything it reads from the
+game goes through a name that is looked up at startup in
+`assets/signatures/<version>.json`. When Bedrock updates, what needs to change is
+that JSON file, not the client. If a signature is missing, the feature that needs
+it turns off and the Diagnostics page says which one, and the game keeps running.
 
-Without a pack, everything that does not depend on the game still works: the
-menu, themes, profiles, the HUD editor, FPS, CPS, clock, keystrokes, memory,
+Packs are not in the repository. Each release has the pack for the game versions
+it was tested on attached next to the exe: put it in
+`%APPDATA%\Velyx\assets\signatures\`.
+
+Without a pack, everything that does not read the game still works: the menu,
+themes, profiles, the HUD editor, FPS, CPS, clock, keystrokes, memory, the
 performance graph, screenshots, filters, fullbright, the frame limiter, process
 tuning, the system monitor, playtime and the benchmark.
 
-The Combat category hangs off one entry, `Level::runtimeActorList`. The camera it
-projects through is a second: with `ClientInstance::viewMatrix` the projection is
-exact, and without it Velyx derives one from the player's eye and rotation, which
-is accurate in first person and calibrated from the Hitboxes settings.
+The whole Combat category depends on one entry, `Level::runtimeActorList`. The
+camera used to draw on top of the world is a second one. With
+`ClientInstance::viewMatrix` the projection is exact. Without it, Velyx rebuilds
+one from the player's eye position and rotation, which is accurate in first person
+and can be calibrated in the Hitboxes settings.
 
 See [`assets/signatures/README.md`](assets/signatures/README.md) to write one.
 
 ## Running several accounts
 
-Bedrock is an MSIX app, so Windows refuses to start two copies of it. The
-launcher gets around that by giving each instance a genuinely distinct package
-identity: hard linked game files, a rewritten `AppxManifest.xml`, and a
-loose file registration. Windows then treats each one as a separate application
-with its own data container, which is what gives it its own Xbox sign in.
+Bedrock is an MSIX app, so Windows will not start two copies of it. The launcher
+works around this by giving every instance its own package identity: hard linked
+game files, a rewritten `AppxManifest.xml` and a loose file registration. Windows
+then sees each copy as a separate app with its own data folder, and so with its
+own Xbox sign in.
 
-Velyx stores no credentials and no tokens. An account in the launcher is a label
-you attach to an instance; the sign in happens in the game and stays there.
+Velyx stores no passwords and no tokens. An account in the launcher is just a
+label on an instance. You sign in inside the game, and the sign in stays there.
 
-Creating instances needs Windows Developer Mode enabled. The launcher checks
-before you try.
+Creating instances needs Windows Developer Mode. The launcher checks for it
+before you start.
 
 ## Where the line is
 
-No killaura, no aim assist, no auto-clicker, no fly, no reach extension, no
-gameplay automation. Nothing here plays for you, and nothing here changes what
-the server sees — the reach readout *measures* your hits, it does not lengthen
-them. Every module declares what it touches (network, files, synthetic input,
-game memory, clipboard, system) and the menu shows that before you enable it.
+No killaura, no aim assist, no auto clicker, no fly, no reach extension, no
+automation of any kind. Velyx does not play for you and does not change what the
+server receives. The reach readout only measures your hits, it does not make them
+longer. Each module lists what it touches (network, files, synthetic input, game
+memory, clipboard, system) and the menu shows it before you turn the module on.
 
-The Combat category does put information on screen that the game does not give
-you. Velyx has no access to the world's collision, so it cannot tell whether an
-entity is behind a wall: a hitbox, a nametag or a tracer is drawn from the
-entity's position whether you can see it or not. That is a real advantage in
-multiplayer, and servers that care will treat it as one. None of it is on until
-you switch it on — or pick the PvP profile or preset, which does — and the range
-and entity filters are there so you can keep it to what you actually want.
+Only one module sends anything: `velyx_users` posts a single chat line when you
+join a server. The server logs it like any other message, and players without
+Velyx see it as plain text. The module is off by default, sending and listening
+are two separate settings, and you can turn sending off and still see the others.
+
+The Combat category does show information the game does not give you. Velyx
+cannot read the world's collision, so it cannot know if an entity is behind a
+wall: hitboxes, nametags and tracers are drawn from the entity's position, visible
+or not. In multiplayer that is a real advantage, and servers that care about it
+will treat it as one. None of it is on until you enable it, or pick the PvP
+profile which does. The range and entity filters let you limit it to what you
+actually want.
 
 ## Docs
 
@@ -112,9 +133,9 @@ and entity filters are there so you can keep it to what you actually want.
 [Architecture](docs/ARCHITECTURE.md) ·
 [Roadmap](docs/ROADMAP.md)
 
-Licensed under [GPL-3.0](LICENSE). No Flarial code was copied; that project is
+Licensed under [GPL-3.0](LICENSE). No Flarial code was copied. That project is
 AGPL-3.0 and was only used as a reference for which game functions a Bedrock
-client has to reach. Bundled dependencies are MinHook (BSD-2-Clause) and
+client needs to reach. Bundled dependencies are MinHook (BSD-2-Clause) and
 nlohmann/json (MIT).
 
 Minecraft is a trademark of Mojang AB. Velyx is not affiliated with or endorsed
