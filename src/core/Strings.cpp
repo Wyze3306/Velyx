@@ -50,6 +50,25 @@ std::wstring toUtf16(std::string_view text) {
     return result;
 }
 
+std::string systemError(uint32_t code) {
+    LPSTR buffer = nullptr;
+    const DWORD size = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr, code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        reinterpret_cast<LPSTR>(&buffer), 0, nullptr);
+
+    std::string message = size && buffer ? std::string(buffer, size) : std::string("unknown error");
+    if (buffer) LocalFree(buffer);
+
+    while (!message.empty() && (message.back() == '\n' || message.back() == '\r')) {
+        message.pop_back();
+    }
+
+    char formatted[32]{};
+    std::snprintf(formatted, sizeof(formatted), " (0x%08X)", static_cast<unsigned>(code));
+    return message + formatted;
+}
+
 std::string toLower(std::string_view text) {
     std::string result(text);
     std::ranges::transform(result, result.begin(), lowerAscii);

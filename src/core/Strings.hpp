@@ -11,6 +11,10 @@ namespace velyx::strings {
 std::string toUtf8(std::wstring_view text);
 std::wstring toUtf16(std::string_view text);
 
+// What Windows says about one of its own error codes, with the code kept alongside the
+// sentence: the sentence is for the user, the number is what a search engine answers to.
+std::string systemError(uint32_t code);
+
 std::string toLower(std::string_view text);
 std::string toUpper(std::string_view text);
 

@@ -29,7 +29,9 @@
 #include "core/Resources.hpp"
 #include "core/Strings.hpp"
 #include "launcher/account/AccountStore.hpp"
+#include "launcher/instance/GameOptions.hpp"
 #include "launcher/instance/InstanceManager.hpp"
+#include "launcher/instance/SystemTuning.hpp"
 
 using namespace velyx;
 
@@ -77,6 +79,7 @@ int g_nextWidget = 0;
 int g_selected = -1;
 int g_menu = -1;
 int g_rowMenu = -1;
+int g_tuneMenu = -1;
 float g_scroll = 0.f;
 
 std::string g_status = "Ready.";
@@ -482,6 +485,77 @@ void bindAccount(const std::string& id, const std::string& name) {
               " ». Sign in from the game on first launch.");
 }
 
+// The game rewrites its own settings when it exits, so anything written underneath a
+// running instance is thrown away the moment the player closes it. Better to say so.
+bool tunable(const Instance& instance) {
+    if (!instance.running()) return true;
+    setStatus("Close " + instance.name + " first: the game rewrites its settings on the way out.",
+              true);
+    return false;
+}
+
+void applyPreset(const Instance& instance, gameoptions::Preset preset) {
+    if (!tunable(instance)) return;
+
+    const gameoptions::Result result = gameoptions::apply(instance.packageFamilyName, preset);
+    if (!result.ok) {
+        setStatus(result.summary(), true);
+        return;
+    }
+
+    setStatus(std::string(gameoptions::presetName(preset)) + ": " + result.summary());
+}
+
+void restorePreset(const Instance& instance) {
+    if (!tunable(instance)) return;
+
+    std::string error;
+    if (!gameoptions::restore(instance.packageFamilyName, &error)) {
+        setStatus(error, true);
+        return;
+    }
+
+    setStatus("The graphics settings are back as they were.");
+}
+
+void toggleGpuPreference(const Instance& instance) {
+    const bool on = tuning::highPerformanceGpu(instance.activationId()) == tuning::State::On;
+
+    std::string error;
+    if (!tuning::setHighPerformanceGpu(instance.activationId(), !on, &error)) {
+        setStatus(error, true);
+        return;
+    }
+
+    setStatus(on ? "Windows will pick the graphics card for this instance again."
+                 : "This instance will run on the high-performance graphics card.");
+}
+
+void toggleBackgroundRecording() {
+    const bool on = tuning::backgroundRecording() != tuning::State::Off;
+
+    std::string error;
+    if (!tuning::setBackgroundRecording(!on, &error)) {
+        setStatus(error, true);
+        return;
+    }
+
+    setStatus(on ? "Background recording is off. Sign out and back in for it to take everywhere."
+                 : "Background recording is back on.");
+}
+
+void togglePowerPlan() {
+    const bool holding = tuning::holdingPowerPlan();
+    tuning::holdPowerPlan(!holding);
+
+    if (tuning::holdingPowerPlan()) {
+        setStatus("Holding the high-performance power plan. Closing Velyx puts yours back.");
+    } else {
+        setStatus(holding ? "Your power plan is back." : "The power plan could not be changed.",
+                  !holding);
+    }
+}
+
 void drawInstanceRow(const Rect& rect, const Instance& instance, int index) {
     const int id = ++g_nextWidget;
     const bool hovered = rect.contains(g_mouse) && !busy();
@@ -535,6 +609,7 @@ void drawInstanceRow(const Rect& rect, const Instance& instance, int index) {
         if (g_clicked) {
             g_selected = index;
             g_rowMenu = -1;
+            g_tuneMenu = -1;
             g_menu = menuOpen ? -1 : index;
             if (g_menu == index && g_versions.empty()) loadVersions();
         }
@@ -607,6 +682,7 @@ void drawInstanceRow(const Rect& rect, const Instance& instance, int index) {
         if (g_clicked) {
             g_selected = index;
             g_menu = -1;
+            g_tuneMenu = -1;
             g_rowMenu = g_rowMenu == index ? -1 : index;
         }
     }
@@ -621,16 +697,16 @@ void drawRowMenu(const Rect& rowRect, int index) {
 
     const Instance& instance = g_instances[static_cast<size_t>(index)];
     const Rect menu{rowRect.right - 226.f, rowRect.center().y + 18.f, rowRect.right - 16.f,
-                    rowRect.center().y + 120.f};
+                    rowRect.center().y + 150.f};
 
     fill(menu.translated({0.f, 4.f}), Color::rgb8(0, 0, 0, 80), 12.f);
     fill(menu, Color::rgb8(23, 25, 29), 12.f);
     stroke(menu, Color::rgb8(46, 52, 59), 12.f);
 
-    static const char* kLabels[3] = {"Link an account", "Open the folder", "Delete"};
+    static const char* kLabels[4] = {"Tuning", "Link an account", "Open the folder", "Delete"};
 
     float y = menu.top + 6.f;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         const Rect item{menu.left + 4.f, y, menu.right - 4.f, y + 30.f};
         y += 30.f;
 
@@ -641,15 +717,17 @@ void drawRowMenu(const Rect& rowRect, int index) {
         }
 
         write(kLabels[i], Rect{item.left + 12.f, item.top, item.right - 10.f, item.bottom},
-              i == 2 ? kDanger : kTextMuted, g_fontSmall);
+              i == 3 ? kDanger : kTextMuted, g_fontSmall);
 
         if (!itemHover || !g_clicked) continue;
 
         g_rowMenu = -1;
 
         if (i == 0) {
-            bindAccount(instance.id, instance.name);
+            g_tuneMenu = index;
         } else if (i == 1) {
+            bindAccount(instance.id, instance.name);
+        } else if (i == 2) {
             ShellExecuteW(nullptr, L"open", instance.root.wstring().c_str(), nullptr, nullptr,
                           SW_SHOWNORMAL);
         } else {
@@ -657,6 +735,103 @@ void drawRowMenu(const Rect& rowRect, int index) {
         }
         return;
     }
+}
+
+// Everything on this panel is reversible, and everything on it is what the client
+// itself cannot reach: the game's own graphics settings, which are worth more frames
+// than any amount of scheduling, and the two things Windows does to a game whether it
+// is asked to or not.
+void drawTuneMenu(const Rect& rowRect, int index) {
+    if (g_tuneMenu != index || index >= static_cast<int>(g_instances.size())) return;
+
+    const Instance& instance = g_instances[static_cast<size_t>(index)];
+    const bool restorable = gameoptions::hasBackup(instance.packageFamilyName);
+
+    const float rows = restorable ? 6.f : 5.f;
+    const Rect menu{rowRect.right - 342.f, rowRect.center().y + 18.f, rowRect.right - 16.f,
+                    rowRect.center().y + 18.f + 30.f + rows * 30.f + 44.f};
+
+    fill(menu.translated({0.f, 4.f}), Color::rgb8(0, 0, 0, 80), 12.f);
+    fill(menu, Color::rgb8(23, 25, 29), 12.f);
+    stroke(menu, Color::rgb8(46, 52, 59), 12.f);
+
+    float y = menu.top + 6.f;
+
+    const auto section = [&](const char* label) {
+        write(label, Rect{menu.left + 12.f, y, menu.right - 12.f, y + 22.f}, kTextDim,
+              g_fontSmall);
+        y += 22.f;
+    };
+
+    // Returns true on the frame it is clicked. The trailing text is the state, where
+    // the entry has one, so that nothing on this panel has to be tried to be read.
+    const auto entry = [&](std::string_view label, std::string_view state, Color stateColor) {
+        const Rect item{menu.left + 4.f, y, menu.right - 4.f, y + 30.f};
+        y += 30.f;
+
+        const bool itemHover = item.contains(g_mouse) && !busy();
+        if (itemHover) {
+            fill(item, kSurfaceHover, 8.f);
+            g_hotWidget = ++g_nextWidget;
+        }
+
+        write(label, Rect{item.left + 12.f, item.top, item.right - 90.f, item.bottom},
+              itemHover ? kText : kTextMuted, g_fontSmall);
+
+        if (!state.empty()) {
+            write(state, Rect{item.right - 92.f, item.top, item.right - 14.f, item.bottom},
+                  stateColor, g_fontSmallRight);
+        }
+
+        return itemHover && g_clicked;
+    };
+
+    section("THE GAME'S OWN SETTINGS");
+
+    if (entry("Performance preset", "", {})) {
+        g_tuneMenu = -1;
+        applyPreset(instance, gameoptions::Preset::Performance);
+        return;
+    }
+
+    if (entry("Balanced preset", "", {})) {
+        g_tuneMenu = -1;
+        applyPreset(instance, gameoptions::Preset::Balanced);
+        return;
+    }
+
+    if (restorable && entry("Put the originals back", "", {})) {
+        g_tuneMenu = -1;
+        restorePreset(instance);
+        return;
+    }
+
+    section("WHAT WINDOWS DOES ANYWAY");
+
+    const tuning::State gpu = tuning::highPerformanceGpu(instance.activationId());
+    if (entry("High-performance graphics card",
+              gpu == tuning::State::Unknown ? "--" : gpu == tuning::State::On ? "on" : "off",
+              gpu == tuning::State::On ? kAccent : kTextDim)) {
+        toggleGpuPreference(instance);
+    }
+
+    const tuning::State recording = tuning::backgroundRecording();
+    if (entry("Background recording",
+              recording == tuning::State::Unknown ? "--"
+              : recording == tuning::State::On    ? "on"
+                                                  : "off",
+              recording == tuning::State::On ? kDanger : kAccent)) {
+        toggleBackgroundRecording();
+    }
+
+    const bool holding = tuning::holdingPowerPlan();
+    if (entry("Hold the high-performance power plan", holding ? "held" : "off",
+              holding ? kAccent : kTextDim)) {
+        togglePowerPlan();
+    }
+
+    write("The last two are machine-wide, and both go back when you say so.",
+          Rect{menu.left + 12.f, y + 6.f, menu.right - 12.f, y + 40.f}, kTextDim, g_fontSmall);
 }
 
 void drawVersionMenu(const Rect& rowRect, int index) {
@@ -890,6 +1065,7 @@ void render(const Rect& client) {
             y += kRowHeight + kRowGap;
             drawVersionMenu(row, static_cast<int>(i));
             drawRowMenu(row, static_cast<int>(i));
+            drawTuneMenu(row, static_cast<int>(i));
         }
     }
 
@@ -898,6 +1074,14 @@ void render(const Rect& client) {
          kBorder.fade(0.6f));
     write(g_status, Rect{status.left + 24.f, status.top, status.right - 24.f, status.bottom},
           g_statusIsError ? kDanger : kTextDim, g_fontSmall);
+
+    // A click that landed on nothing closes whatever was open. The menus are drawn
+    // last, so by here a click inside one of them has already claimed the frame.
+    if (g_clicked && g_hotWidget == 0) {
+        g_menu = -1;
+        g_rowMenu = -1;
+        g_tuneMenu = -1;
+    }
 
     drawBusyOverlay(client);
 }
@@ -1174,6 +1358,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
 
     if (g_job.worker.joinable()) g_job.worker.join();
+
+    // Whatever the launcher was holding on the machine's behalf goes back before it
+    // leaves, whether it was let go of on screen or not.
+    tuning::holdPowerPlan(false);
 
     destroyGraphics();
     Log::shutdown();

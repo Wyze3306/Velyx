@@ -5,6 +5,7 @@
 #include <shobjidl.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <format>
@@ -203,6 +204,116 @@ std::string activationHint(HRESULT hr) {
     }
 }
 
+// SeBackupPrivilege lets a read walk past the file's ACL, which is the whole difference
+// between "this account may not read that" and "nobody may". It costs nothing when the
+// token does not hold it, and the clone reaches for it only once a plain read is refused.
+bool enableBackupPrivilege() {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &token)) return false;
+
+    TOKEN_PRIVILEGES privileges{};
+    privileges.PrivilegeCount = 1;
+    privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+    const bool ok = LookupPrivilegeValueW(nullptr, SE_BACKUP_NAME,
+                                          &privileges.Privileges[0].Luid) &&
+                    AdjustTokenPrivileges(token, FALSE, &privileges, 0, nullptr, nullptr) &&
+                    GetLastError() == ERROR_SUCCESS;
+
+    CloseHandle(token);
+    return ok;
+}
+
+// The copy CopyFileW will not do: the source opened sharing everything, so a file another
+// process is still writing reads anyway, and opened with backup semantics, so an ACL that
+// refuses us is stepped over where the token allows it. Returns what stopped it, if
+// anything, and leaves no half-written file behind.
+DWORD copyThroughBackup(const std::filesystem::path& source,
+                        const std::filesystem::path& target) {
+    const HANDLE in =
+        CreateFileW(source.c_str(), GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (in == INVALID_HANDLE_VALUE) return GetLastError();
+
+    const HANDLE out = CreateFileW(target.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                   FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (out == INVALID_HANDLE_VALUE) {
+        const DWORD status = GetLastError();
+        CloseHandle(in);
+        return status;
+    }
+
+    std::vector<char> buffer(1 << 20);
+    DWORD status = ERROR_SUCCESS;
+
+    for (;;) {
+        DWORD read = 0;
+        if (!ReadFile(in, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr)) {
+            status = GetLastError();
+            break;
+        }
+        if (read == 0) break;
+
+        DWORD written = 0;
+        if (!WriteFile(out, buffer.data(), read, &written, nullptr) || written != read) {
+            status = GetLastError();
+            break;
+        }
+    }
+
+    CloseHandle(out);
+    CloseHandle(in);
+
+    if (status != ERROR_SUCCESS) DeleteFileW(target.c_str());
+    return status;
+}
+
+// One file, by whichever of the three routes this pair of paths allows. `linking` survives
+// a refusal that is about this one file and dies on one that is about the volume: a link
+// that cannot cross drives, or a filesystem with no links at all, settles the question for
+// the whole walk, while a single file Windows guards says nothing about the next one.
+DWORD cloneOne(const std::filesystem::path& source, const std::filesystem::path& target,
+               bool& linking) {
+
+    // Anything cloned out of WindowsApps arrives read-only, so a leftover from an earlier
+    // attempt refuses the link and the copy alike — with the same access denial the source
+    // itself would give, which is the wrong answer to explain to anyone.
+    const DWORD existing = GetFileAttributesW(target.c_str());
+    if (existing != INVALID_FILE_ATTRIBUTES) {
+        if (existing & FILE_ATTRIBUTE_READONLY) {
+            SetFileAttributesW(target.c_str(), existing & ~FILE_ATTRIBUTE_READONLY);
+        }
+        DeleteFileW(target.c_str());
+    }
+
+    if (linking) {
+        if (CreateHardLinkW(target.c_str(), source.c_str(), nullptr)) return ERROR_SUCCESS;
+
+        const DWORD status = GetLastError();
+        if (status != ERROR_ACCESS_DENIED && status != ERROR_SHARING_VIOLATION) {
+            linking = false;
+            Log::info(kLog, "hard links unavailable here ({}), copying the game instead",
+                      strings::systemError(status));
+        }
+    }
+
+    // Not std::filesystem::copy_file: it opens the source asking to share writes, which
+    // the image section behind a running executable refuses outright -- so the one file
+    // in the package that happens to be running is the one file that will not copy.
+    // CopyFileW asks for read sharing only, the way Explorer copies a running program,
+    // and returns the code Windows meant instead of folding every refusal into EACCES.
+    if (CopyFileW(source.c_str(), target.c_str(), FALSE)) return ERROR_SUCCESS;
+
+    const DWORD status = GetLastError();
+    if (status != ERROR_ACCESS_DENIED && status != ERROR_SHARING_VIOLATION) return status;
+
+    // Both of those are answers about the handle CopyFileW asked for, which is not always
+    // an answer about the file: one more attempt, sharing everything and reading the way a
+    // backup does. The first code is the one worth reporting if this fails too.
+    return copyThroughBackup(source, target) == ERROR_SUCCESS ? ERROR_SUCCESS : status;
+}
+
 std::string slugify(std::string_view name) {
     std::string slug;
     slug.reserve(name.size());
@@ -345,6 +456,42 @@ Instance* InstanceManager::find(const std::string& id) {
     return it == instances_.end() ? nullptr : &*it;
 }
 
+namespace {
+
+// Since 1.21.120 the game ships as a GDK title rather than a UWP one. The Store still
+// registers a package, so Get-AppxPackage still answers, but what it points at is a view
+// of a licensed container: everything in it reads except the executable, which the
+// licence layer hands to the game and to nobody else. The files that can actually be
+// copied are the flat ones the installer lays down in <drive>:\XboxGames.
+std::optional<std::filesystem::path> findFlatInstall() {
+    std::array<wchar_t, 512> drives{};
+    const DWORD length = GetLogicalDriveStringsW(static_cast<DWORD>(drives.size() - 1),
+                                                 drives.data());
+    if (length == 0) return std::nullopt;
+
+    std::optional<std::filesystem::path> fallback;
+    std::error_code ec;
+
+    for (const wchar_t* drive = drives.data(); *drive; drive += wcslen(drive) + 1) {
+        const std::filesystem::path games = std::filesystem::path(drive) / "XboxGames";
+        if (!std::filesystem::is_directory(games, ec)) continue;
+
+        for (const auto& entry : std::filesystem::directory_iterator(games, ec)) {
+            const auto content = entry.path() / "Content";
+            if (!std::filesystem::exists(content / kGameExecutable, ec)) continue;
+
+            // "Minecraft" and "Minecraft Preview" sit side by side under the same
+            // folder; the release is the one an instance is asked for by default.
+            if (entry.path().filename() == "Minecraft") return content;
+            if (!fallback) fallback = content;
+        }
+    }
+
+    return fallback;
+}
+
+}
+
 std::optional<std::filesystem::path> InstanceManager::findInstalledGame(std::string* version) {
     std::string output;
     const int status = runPowerShell(
@@ -363,6 +510,13 @@ std::optional<std::filesystem::path> InstanceManager::findInstalledGame(std::str
     if (version && parts.size() > 1) *version = std::string(strings::trim(parts[1]));
 
     std::filesystem::path location(std::string(strings::trim(parts[0])));
+
+    // The package location is the right answer for a UWP install and the wrong one for a
+    // GDK install, where it names a container rather than the files.
+    if (const auto flat = findFlatInstall()) {
+        Log::info(kLog, "game found as flat files at {}", flat->string());
+        return *flat;
+    }
 
     std::error_code ec;
     if (!std::filesystem::exists(location / kGameExecutable, ec)) return std::nullopt;
@@ -444,6 +598,31 @@ std::string InstanceManager::CloneResult::failure() const {
     std::string message = std::format("the game files could not be copied "
                                       "({} copied, {} failed)", copied, failed);
     if (!firstError.empty()) message += ". First error: " + firstError;
+
+    switch (firstErrorCode) {
+        case ERROR_SHARING_VIOLATION:
+            message += ". Another process is holding that file open: close Minecraft, wait "
+                       "for its window to go, and try again.";
+            break;
+        case ERROR_ACCESS_DENIED:
+
+            // A refusal on the game's own binary alone is a different problem from a
+            // refusal on the package: the folder plainly reads, so the remedy is not
+            // about which account is running Velyx.
+            message += payloadRefused
+                           ? ". The rest of the package reads fine, so Windows is guarding "
+                             "that one file: check that no Minecraft.Windows.exe is left in "
+                             "the task manager, and that no antivirus is holding the game "
+                             "back. If it keeps refusing, use \"Add a version folder\" and "
+                             "build the instance from an unpacked copy instead."
+                           : ". Windows will not let Velyx read that file. Run Velyx as the "
+                             "same user that installed Minecraft, without administrator "
+                             "rights.";
+            break;
+        default:
+            break;
+    }
+
     return message;
 }
 
@@ -472,8 +651,26 @@ InstanceManager::CloneResult InstanceManager::cloneFiles(const std::filesystem::
         if (entry.is_regular_file(ec)) ++total;
     }
 
-    // Linking until proven otherwise: see the first refusal below.
+    enableBackupPrivilege();
+
+    // Linking until proven otherwise: see cloneOne.
     bool linking = mode == CloneMode::Link;
+
+    // The game's own binary is the file the package cannot do without, and the file Windows
+    // is likeliest to hold back. Taking it first costs a refusal a few seconds instead of
+    // the whole forty-thousand-file walk, and tells the message which story to tell.
+    const std::filesystem::path payload(kGameExecutable);
+    if (std::filesystem::exists(source / payload, ec)) {
+        const DWORD status = cloneOne(source / payload, destination / payload, linking);
+        if (status != ERROR_SUCCESS) {
+            result.failed = 1;
+            result.firstError = payload.string() + ": " + strings::systemError(status);
+            result.firstErrorCode = status;
+            result.payloadRefused = true;
+            return result;
+        }
+        ++result.copied;
+    }
 
     for (const auto& entry : std::filesystem::recursive_directory_iterator(source, ec)) {
         const auto relative = std::filesystem::relative(entry.path(), source, ec);
@@ -484,36 +681,17 @@ InstanceManager::CloneResult InstanceManager::cloneFiles(const std::filesystem::
             continue;
         }
         if (!entry.is_regular_file(ec)) continue;
+        if (relative == payload) continue;
 
         std::filesystem::create_directories(target.parent_path(), ec);
 
-        std::error_code fileEc;
-        if (linking) {
-            std::filesystem::create_hard_link(entry.path(), target, fileEc);
+        const DWORD status = cloneOne(entry.path(), target, linking);
 
-            // Whether hard links work at all is a property of the two paths, not of the
-            // file: a different volume, or a filesystem that has none. The first refusal
-            // settles it for the rest of the walk, which otherwise pays for a failing
-            // call on every one of several thousand files before copying it anyway.
-            if (fileEc) {
-                linking = false;
-                Log::info(kLog, "hard links unavailable here ({}), copying the game instead",
-                          fileEc.message());
-
-                fileEc.clear();
-                std::filesystem::copy_file(entry.path(), target,
-                                           std::filesystem::copy_options::overwrite_existing,
-                                           fileEc);
-            }
-        } else {
-            std::filesystem::copy_file(entry.path(), target,
-                                       std::filesystem::copy_options::overwrite_existing, fileEc);
-        }
-
-        if (fileEc) {
+        if (status != ERROR_SUCCESS) {
             ++result.failed;
             if (result.firstError.empty()) {
-                result.firstError = relative.string() + " : " + fileEc.message();
+                result.firstError = relative.string() + ": " + strings::systemError(status);
+                result.firstErrorCode = status;
             }
             continue;
         }
@@ -571,6 +749,10 @@ bool InstanceManager::setVersion(Instance& instance, const VersionSource& source
         return fail("stop the instance before changing its version");
     }
 
+    if (!Process::findByName(kGameExecutable).empty()) {
+        return fail("Minecraft is running. Close the game before changing the version.");
+    }
+
     std::error_code ec;
     if (!std::filesystem::exists(source.root / kGameExecutable, ec)) {
         return fail("this version is no longer on the disk");
@@ -614,6 +796,12 @@ bool InstanceManager::create(const std::string& name, CloneMode mode, const Prog
         return false;
     };
 
+    // Copying the package while the game runs is the one case that fails on a single file
+    // out of forty thousand, and the file it fails on is the game itself.
+    if (!Process::findByName(kGameExecutable).empty()) {
+        return fail("Minecraft is running. Close the game before creating an instance.");
+    }
+
     std::string version;
     const auto source = findInstalledGame(&version);
     if (!source) {
@@ -623,6 +811,16 @@ bool InstanceManager::create(const std::string& name, CloneMode mode, const Prog
     if (!developerModeEnabled()) {
         return fail("Windows developer mode has to be enabled "
                     "(Settings > Privacy & security > For developers).");
+    }
+
+    // A GDK install describes itself in MicrosoftGame.Config and carries no manifest to
+    // patch, so an instance built from it would copy for ten minutes and then fail on
+    // the identity it cannot rewrite. Said here, it costs nothing.
+    std::error_code sourceEc;
+    if (!std::filesystem::exists(*source / "AppxManifest.xml", sourceEc)) {
+        return fail("this is a GDK build of Minecraft (" + version + "), which Velyx "
+                    "cannot turn into an instance yet: it has no AppxManifest.xml to give "
+                    "a separate identity.");
     }
 
     Instance instance;

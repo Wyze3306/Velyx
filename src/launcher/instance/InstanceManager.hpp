@@ -84,6 +84,8 @@ private:
         size_t copied = 0;
         size_t failed = 0;
         std::string firstError;
+        unsigned firstErrorCode = 0;
+        bool payloadRefused = false;
 
         [[nodiscard]] std::string failure() const;
     };

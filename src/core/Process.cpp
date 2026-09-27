@@ -68,20 +68,6 @@ std::filesystem::path imagePathFromPeb(uint32_t pid) {
     return std::filesystem::path(image);
 }
 
-std::string lastErrorMessage(DWORD code) {
-    LPSTR buffer = nullptr;
-    const DWORD size = FormatMessageA(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-        nullptr, code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-        reinterpret_cast<LPSTR>(&buffer), 0, nullptr);
-
-    std::string message = size && buffer ? std::string(buffer, size) : std::string("unknown error");
-    if (buffer) LocalFree(buffer);
-
-    while (!message.empty() && (message.back() == '\n' || message.back() == '\r')) message.pop_back();
-    return std::format("{} (0x{:08X})", message, static_cast<unsigned>(code));
-}
-
 }
 
 std::vector<ProcessInfo> Process::enumerate() {
@@ -179,7 +165,7 @@ bool Process::grantAppContainerAccess(const std::filesystem::path& target) {
     PSID sid = nullptr;
     if (!ConvertStringSidToSidW(L"S-1-15-2-1", &sid)) {
         Log::warn(kLog, "could not build the AppContainer SID: {}",
-                  lastErrorMessage(GetLastError()));
+                  strings::systemError(GetLastError()));
         return false;
     }
 
@@ -192,7 +178,7 @@ bool Process::grantAppContainerAccess(const std::filesystem::path& target) {
     if (status != ERROR_SUCCESS) {
         LocalFree(sid);
         Log::warn(kLog, "GetNamedSecurityInfo failed for {}: {}",
-                  target.string(), lastErrorMessage(status));
+                  target.string(), strings::systemError(status));
         return false;
     }
 
@@ -217,7 +203,7 @@ bool Process::grantAppContainerAccess(const std::filesystem::path& target) {
 
     if (status != ERROR_SUCCESS) {
         Log::warn(kLog, "could not grant AppContainer access to {}: {}",
-                  target.string(), lastErrorMessage(status));
+                  target.string(), strings::systemError(status));
         return false;
     }
 
@@ -248,14 +234,14 @@ bool Process::injectLibrary(uint32_t pid, const std::filesystem::path& dll, std:
         if (code == ERROR_INVALID_PARAMETER) {
             // Windows has no process by that id: the one we were handed already exited.
             return fail(std::format("le processus {} n'existe plus (OpenProcess: {})", pid,
-                                    lastErrorMessage(code)));
+                                    strings::systemError(code)));
         }
         if (code == ERROR_ACCESS_DENIED) {
             return fail(std::format(
                 "Windows a refusé l'accès au processus du jeu (OpenProcess: {}). "
-                "Lancez Velyx avec les mêmes droits que le jeu.", lastErrorMessage(code)));
+                "Lancez Velyx avec les mêmes droits que le jeu.", strings::systemError(code)));
         }
-        return fail(std::format("OpenProcess: {}", lastErrorMessage(code)));
+        return fail(std::format("OpenProcess: {}", strings::systemError(code)));
     }
 
     const std::wstring wide = std::filesystem::absolute(dll, ec).wstring();
@@ -264,11 +250,11 @@ bool Process::injectLibrary(uint32_t pid, const std::filesystem::path& dll, std:
     void* remote = VirtualAllocEx(process.handle, nullptr, bytes, MEM_COMMIT | MEM_RESERVE,
                                   PAGE_READWRITE);
     if (!remote) {
-        return fail(std::format("VirtualAllocEx: {}", lastErrorMessage(GetLastError())));
+        return fail(std::format("VirtualAllocEx: {}", strings::systemError(GetLastError())));
     }
 
     if (!WriteProcessMemory(process.handle, remote, wide.c_str(), bytes, nullptr)) {
-        const auto message = lastErrorMessage(GetLastError());
+        const auto message = strings::systemError(GetLastError());
         VirtualFreeEx(process.handle, remote, 0, MEM_RELEASE);
         return fail(std::format("WriteProcessMemory: {}", message));
     }
@@ -280,7 +266,7 @@ bool Process::injectLibrary(uint32_t pid, const std::filesystem::path& dll, std:
     const HandleGuard thread(
         CreateRemoteThread(process.handle, nullptr, 0, loadLibrary, remote, 0, nullptr));
     if (!thread.valid()) {
-        const auto message = lastErrorMessage(GetLastError());
+        const auto message = strings::systemError(GetLastError());
         VirtualFreeEx(process.handle, remote, 0, MEM_RELEASE);
         return fail(std::format("CreateRemoteThread: {}", message));
     }
