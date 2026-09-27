@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Velyx
-        VERSION 0.1.0
+        VERSION 0.0.1
         DESCRIPTION "Velyx - Minecraft Bedrock Edition utility client"
         LANGUAGES C CXX)
 
